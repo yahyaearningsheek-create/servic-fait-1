@@ -14,7 +14,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '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';
   const isNvidiaKey = GEMINI_API_KEY.startsWith('nvapi-');
 
   // NVIDIA NIM Engine
