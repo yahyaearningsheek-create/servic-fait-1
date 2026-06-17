@@ -13,7 +13,7 @@ import { Employee, fetchEmployees } from "../lib/supabase";
 
 interface NewInterventionFormProps {
   onSave: (intervention: Omit<Intervention, "id" | "refNumber" | "createdAt">) => void;
-  techProfile: TechProfile;
+  techProfile: TechProfile | null;
   theme?: "light" | "dark";
   interventions: Intervention[];
 }
@@ -589,8 +589,8 @@ export default function NewInterventionForm({
       clientName: clientName.trim(),
       clientTitle: clientTitle.trim() || "Collaborateur / Directeur",
       clientDepartment,
-      techName: techProfile.name || "Technicien Informatique",
-      techTitle: techProfile.title || "Support CNIPLC",
+      techName: techProfile?.name || "Technicien Informatique",
+      techTitle: techProfile?.title || "Support CNIPLC",
       deviceType,
       deviceBrand: deviceBrand.trim() || "Standard",
       deviceInventory: deviceInventory.trim() || "N/A",
@@ -748,7 +748,7 @@ export default function NewInterventionForm({
           <span className={`text-xs font-mono px-2 py-0.5 rounded ${
             isDark ? "bg-teal-950/40 text-teal-400 border border-teal-500/20" : "bg-teal-50 text-teal-700"
           }`}>
-            Intervenant actif : {techProfile.name || "Non Défini"}
+            Intervenant actif : {techProfile?.name || "Non Défini"}
           </span>
         </h3>
 
