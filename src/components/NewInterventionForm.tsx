@@ -9,6 +9,7 @@ import { DEPARTMENTS, DEVICE_TYPES, TASK_CATEGORIES } from "../data/constants";
 import { Sparkles, Plus, Trash2, Save, AlertTriangle, UploadCloud, Camera, X, Mic, MicOff } from "lucide-react";
 import { GoogleGenAI, Type } from "@google/genai";
 import PhotoCollage from "./PhotoCollage";
+import { Employee, fetchEmployees } from "../lib/supabase";
 
 interface NewInterventionFormProps {
   onSave: (intervention: Omit<Intervention, "id" | "refNumber" | "createdAt">) => void;
@@ -23,6 +24,12 @@ export default function NewInterventionForm({
   theme = "light",
   interventions = []
 }: NewInterventionFormProps) {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+
+  React.useEffect(() => {
+    fetchEmployees().then(setEmployees);
+  }, []);
+
   const [clientName, setClientName] = useState("");
   const [clientTitle, setClientTitle] = useState("");
   const [clientDepartment, setClientDepartment] = useState(DEPARTMENTS[0]);
@@ -338,38 +345,34 @@ export default function NewInterventionForm({
     }
   };
 
-  // System of dynamic local memorization for frequent names and departments
-  const clientFrequency: { [name: string]: { count: number; title: string; dept: string } } = {};
+  // Department frequency for standard dropdowns
   const departmentFrequency: { [dept: string]: number } = {};
 
   interventions.forEach((item) => {
-    const name = item.clientName?.trim();
-    if (name) {
-      if (!clientFrequency[name]) {
-        clientFrequency[name] = { count: 0, title: item.clientTitle || "", dept: item.clientDepartment || "" };
-      }
-      clientFrequency[name].count += 1;
-    }
-
     const dept = item.clientDepartment?.trim();
     if (dept) {
       departmentFrequency[dept] = (departmentFrequency[dept] || 0) + 1;
     }
   });
 
-  const topFrequentClients = Object.entries(clientFrequency)
-    .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 5)
-    .map(([name, info]) => ({ name, ...info }));
-
   // Combined standard departments list + frequent custom input ones
   const displayedDepartments = Array.from(new Set([
-    ...topFrequentClients.map(c => c.dept),
+    ...employees.map(c => c.department),
     ...Object.keys(departmentFrequency).sort((a, b) => departmentFrequency[b] - departmentFrequency[a]),
     ...DEPARTMENTS
   ])).filter(Boolean).slice(0, 20);
 
   const isDark = theme === "dark";
+
+  const handleClientNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setClientName(val);
+    const found = employees.find(emp => emp.name === val);
+    if (found) {
+      setClientTitle(found.title);
+      setClientDepartment(found.department);
+    }
+  };
 
   const handleRefineWithIA = async () => {
     if (!rawNotes.trim()) {
@@ -761,46 +764,21 @@ export default function NewInterventionForm({
               id="input-client-name"
               type="text"
               required
-              placeholder="ex: M. Jean-Paul Dupont"
+              placeholder="Sélectionner ou saisir..."
               value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-              list="frequent-clients-list"
+              onChange={handleClientNameChange}
+              list="employees-list"
               className={`w-full text-sm px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                 isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-650" : "bg-white border-slate-200 text-slate-800"
               }`}
             />
-            <datalist id="frequent-clients-list">
-              {topFrequentClients.map((client) => (
-                <option key={client.name} value={client.name}>
-                  {client.title ? `${client.title} - ` : ""}{client.dept}
+            <datalist id="employees-list">
+              {employees.map((emp) => (
+                <option key={emp.id || emp.name} value={emp.name}>
+                  {emp.title ? `${emp.title} - ` : ""}{emp.department}
                 </option>
               ))}
             </datalist>
-
-            {topFrequentClients.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider self-center">Frequent :</span>
-                {topFrequentClients.map((client) => (
-                  <button
-                    key={client.name}
-                    type="button"
-                    onClick={() => {
-                      setClientName(client.name);
-                      setClientTitle(client.title);
-                      setClientDepartment(client.dept);
-                    }}
-                    className={`text-[10px] font-semibold border px-2 py-0.5 rounded-full cursor-pointer transition-colors ${
-                      isDark
-                        ? "border-slate-800 bg-slate-950/60 text-teal-400 hover:text-white hover:bg-slate-800"
-                        : "border-slate-200 bg-slate-100/50 text-teal-700 hover:text-teal-900 hover:bg-slate-200/50"
-                    }`}
-                    title={`Remplir : ${client.title} - ${client.dept}`}
-                  >
-                    {client.name}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {/* Client Title */}

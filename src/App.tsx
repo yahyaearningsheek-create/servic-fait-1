@@ -27,6 +27,7 @@ import {
   writeJsonToDirectory 
 } from "./utils/localDiskStorage";
 import { generateAndDownloadPDF, generateAndDownloadPhotosPDF } from "./utils/pdfGenerator";
+import { fetchInterventions, saveIntervention, deleteIntervention as deleteInterventionSb, checkAndCleanupInterventions } from "./lib/supabase";
 
 export default function App() {
   // Stored states
@@ -172,24 +173,39 @@ export default function App() {
 
   // Load from local storage on mount
   useEffect(() => {
-    const list = localStorage.getItem("cniplc_interventions");
-    if (list) {
-      try {
-        setInterventions(JSON.parse(list));
-      } catch (e) {
-        setInterventions(INITIAL_INTERVENTIONS);
+    async function loadData() {
+      const savedProfile = localStorage.getItem("cniplc_tech_profile");
+      if (savedProfile) {
+        try {
+          setTechProfile(JSON.parse(savedProfile));
+        } catch (e) {}
       }
-    } else {
-      setInterventions(INITIAL_INTERVENTIONS);
-      localStorage.setItem("cniplc_interventions", JSON.stringify(INITIAL_INTERVENTIONS));
-    }
 
-    const savedProfile = localStorage.getItem("cniplc_tech_profile");
-    if (savedProfile) {
       try {
-        setTechProfile(JSON.parse(savedProfile));
-      } catch (e) {}
+        const sbData = await fetchInterventions();
+        if (sbData && sbData.length > 0) {
+          setInterventions(sbData);
+          localStorage.setItem("cniplc_interventions", JSON.stringify(sbData));
+        } else {
+          const list = localStorage.getItem("cniplc_interventions");
+          if (list) {
+            setInterventions(JSON.parse(list));
+          } else {
+            setInterventions(INITIAL_INTERVENTIONS);
+            localStorage.setItem("cniplc_interventions", JSON.stringify(INITIAL_INTERVENTIONS));
+          }
+        }
+      } catch (err) {
+        console.error("Supabase load error:", err);
+        const list = localStorage.getItem("cniplc_interventions");
+        if (list) {
+          setInterventions(JSON.parse(list));
+        } else {
+          setInterventions(INITIAL_INTERVENTIONS);
+        }
+      }
     }
+    loadData();
   }, []);
 
   // Save changes helper
@@ -214,8 +230,26 @@ export default function App() {
       createdAt: new Date().toISOString()
     };
 
-    const newList = [newInt, ...interventions];
-    saveToLocalStorage(newList);
+    let newList = [newInt, ...interventions];
+    setInterventions(newList);
+    localStorage.setItem("cniplc_interventions", JSON.stringify(newList));
+
+    // Save to Supabase
+    try {
+      await saveIntervention(newInt);
+      
+      // Auto-cleanup check
+      const didCleanup = await checkAndCleanupInterventions(newList);
+      if (didCleanup) {
+        showToastNotification("Compte-rendu généré et données Supabase nettoyées (20 interventions).");
+        newList = await fetchInterventions();
+        setInterventions(newList);
+        localStorage.setItem("cniplc_interventions", JSON.stringify(newList));
+      }
+    } catch (err) {
+      console.error("Failed to save to Supabase:", err);
+    }
+
     showToastNotification(`Nouvelle intervention (${newInt.refNumber}) créée et enregistrée avec succès au registre !`);
 
     const downloadName = `CNIPLC_Fiche_${newInt.refNumber.replace(/\s+/g, "_")}.json`;
@@ -277,27 +311,47 @@ export default function App() {
     }
   };
 
-  const handleDeleteIntervention = (id: string) => {
+  const handleDeleteIntervention = async (id: string) => {
     const newList = interventions.filter(i => i.id !== id);
-    saveToLocalStorage(newList);
+    setInterventions(newList);
+    localStorage.setItem("cniplc_interventions", JSON.stringify(newList));
+    
+    try {
+      await deleteInterventionSb(id);
+    } catch (err) {
+      console.error("Failed to delete from Supabase:", err);
+    }
+
     if (selectedIntervention?.id === id) {
       setSelectedIntervention(null);
     }
   };
 
-  const handleToggleStatus = (id: string) => {
+  const handleToggleStatus = async (id: string) => {
+    let updatedInt: Intervention | null = null;
     const newList = interventions.map(i => {
       if (i.id === id) {
         const nextStatus = i.status === "termine" ? "en_cours" : "termine";
-        return {
+        updatedInt = {
           ...i,
           status: nextStatus,
           signatureDate: nextStatus === "termine" ? new Date().toISOString().substring(0, 10) : undefined
         };
+        return updatedInt as Intervention;
       }
       return i;
     });
-    saveToLocalStorage(newList);
+    setInterventions(newList);
+    localStorage.setItem("cniplc_interventions", JSON.stringify(newList));
+
+    if (updatedInt) {
+      try {
+        await saveIntervention(updatedInt);
+      } catch (err) {
+        console.error("Failed to update status in Supabase:", err);
+      }
+    }
+  };
     const toggledItem = newList.find(item => item.id === id);
     const label = toggledItem?.status === "termine" ? "Clôturée" : "En cours d'intervention";
     showToastNotification(`Statut mis à jour : ${label} !`);

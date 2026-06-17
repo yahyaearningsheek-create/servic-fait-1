@@ -1137,3 +1137,8 @@ export async function generateConsolidatedReportPDF(interventions: Intervention[
   const consolidatedPdfFileName = `CNIPLC_Rapport_Consolide_Activite_${new Date().toISOString().substring(0, 10)}.pdf`;
   doc.save(consolidatedPdfFileName);
 }
+
+export function generateAutoCleanupReportPDF(interventions: Intervention[]) {
+  // Wraps the consolidated report function for the auto-cleanup feature
+  generateConsolidatedReportPDF(interventions);
+}

@@ -5,6 +5,7 @@
 
 import React, { useState } from "react";
 import { TechProfile } from "../types";
+import { EmployeeDirectory } from "./EmployeeDirectory";
 import { 
   User, 
   Award, 
@@ -72,7 +73,8 @@ export default function SettingsProfile({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       
       {/* Profile Form & Theme Settings Column */}
       <div className="space-y-6">
@@ -413,6 +415,10 @@ export default function SettingsProfile({
         
       </div>
 
+      </div>
+      
+      {/* Employee Directory Section */}
+      <EmployeeDirectory theme={theme} />
     </div>
   );
 }
