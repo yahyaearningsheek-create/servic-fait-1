@@ -181,8 +181,8 @@ app.post("/api/refine-tasks", async (req: Request, res: Response): Promise<void>
 // Endpoint to notify Telegram
 app.post("/api/notify-telegram", async (req: Request, res: Response) => {
   const body = req.body;
-  const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-  const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+  const BOT_TOKEN = "8774455137:AAFMkDkKbtk0I8qX05R1GAfE8EZbtQyKPe0";
+  const CHAT_ID = "7497438912";
 
   if (!BOT_TOKEN || !CHAT_ID) {
     console.error("Local Environment Variables TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID are missing.");
