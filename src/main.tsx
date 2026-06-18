@@ -5,9 +5,10 @@ import SignalementPage from './components/SignalementPage.tsx';
 import './index.css';
 
 const path = window.location.pathname;
+const isServiceFait = path.startsWith('/service-fait');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {path === '/' ? <SignalementPage /> : <App />}
+    {isServiceFait ? <App /> : <SignalementPage />}
   </StrictMode>,
 );
