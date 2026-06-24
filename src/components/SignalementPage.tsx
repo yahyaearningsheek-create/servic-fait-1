@@ -165,29 +165,50 @@ export default function SignalementPage() {
           </form>
         </div>
 
-        {/* Zone intelligente - Redirection Service Fait */}
-        <div className="bg-gradient-to-br from-emerald-900/40 to-teal-900/30 backdrop-blur-lg rounded-3xl p-8 border border-emerald-500/30 shadow-xl group hover:border-emerald-500/50 transition-all anim-cta">
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 text-center sm:text-left">
-            <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center text-3xl flex-shrink-0 shadow-inner border border-emerald-500/30 group-hover:scale-110 transition-transform">
-              💡
+        {/* Zone intelligente - Portails d'accès professionnels */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 anim-cta">
+          {/* Card 1: OfficeLink */}
+          <div className="bg-gradient-to-br from-blue-950/60 to-indigo-950/40 backdrop-blur-lg rounded-3xl p-6 border border-blue-500/20 shadow-xl group hover:border-blue-500/40 transition-all flex flex-col justify-between">
+            <div>
+              <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center text-2xl mb-4 border border-blue-500/30 group-hover:scale-105 transition-transform">
+                ⚡
+              </div>
+              <h3 className="text-lg font-bold text-blue-300 mb-2">
+                Portail OfficeLink
+              </h3>
+              <p className="text-slate-350 text-xs leading-relaxed mb-6">
+                Accédez à la plateforme Intranet locale pour communiquer avec vos collègues et échanger des fichiers en temps réel sur le réseau local (LAN).
+              </p>
             </div>
-            <div className="flex-1">
-              <h3 className="text-xl font-bold text-emerald-300 mb-2">
+            <a
+              href="/officelink"
+              className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-3 rounded-xl transition-all hover:translate-x-1 shadow-lg shadow-blue-600/20 text-sm"
+            >
+              Accéder à l'Intranet
+              <span>→</span>
+            </a>
+          </div>
+
+          {/* Card 2: Service Fait (Registre IT) */}
+          <div className="bg-gradient-to-br from-emerald-950/60 to-teal-950/40 backdrop-blur-lg rounded-3xl p-6 border border-emerald-500/20 shadow-xl group hover:border-emerald-500/40 transition-all flex flex-col justify-between">
+            <div>
+              <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center text-2xl mb-4 border border-emerald-500/30 group-hover:scale-105 transition-transform">
+                🔧
+              </div>
+              <h3 className="text-lg font-bold text-emerald-300 mb-2">
                 Espace Technicien IT
               </h3>
-              <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-                Si vous êtes membre de l'équipe informatique et que vous souhaitez accéder à l'application 
-                <span className="text-white font-semibold"> Service Fait (Registre Pro)</span> pour gérer les interventions, 
-                cliquez ci-dessous.
+              <p className="text-slate-350 text-xs leading-relaxed mb-6">
+                Consignez les interventions techniques de maintenance, éditez les rapports d'activités en format PDF et suivez les statistiques.
               </p>
-              <a
-                href="/service-fait"
-                className="inline-flex items-center justify-center gap-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-8 py-3.5 rounded-xl transition-all hover:translate-x-2 shadow-lg shadow-emerald-600/30"
-              >
-                Accéder à Service Fait
-                <span className="text-xl">→</span>
-              </a>
             </div>
+            <a
+              href="/officelink/registre-it"
+              className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-xl transition-all hover:translate-x-1 shadow-lg shadow-emerald-600/20 text-sm"
+            >
+              Gérer les Interventions
+              <span>→</span>
+            </a>
           </div>
         </div>
 

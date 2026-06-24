@@ -38,7 +38,11 @@ import {
   checkAndCleanupInterventions 
 } from "./lib/supabase";
 import { Session } from "@supabase/supabase-js";
-export default function App() {
+interface AppProps {
+  embedded?: boolean;
+}
+
+export default function App({ embedded = false }: AppProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -472,6 +476,7 @@ export default function App() {
   // AUTH RENDERING
   // -------------
   if (authLoading) {
+    if (embedded) return <div className="flex items-center justify-center py-16"><p className="text-xl font-medium animate-pulse">Chargement...</p></div>;
     return (
       <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
         <p className="text-xl font-medium animate-pulse">Chargement de la session...</p>
@@ -480,6 +485,7 @@ export default function App() {
   }
 
   if (!session) {
+    if (embedded) return <div className="flex items-center justify-center py-16 text-slate-500"><p>Veuillez vous reconnecter.</p></div>;
     return (
       <div className={`min-h-screen flex items-center justify-center p-4 ${isDark ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
         <div className={`max-w-md w-full p-8 rounded-2xl shadow-xl border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
@@ -568,6 +574,62 @@ export default function App() {
   // -------------
   // MAIN APP
   // -------------
+
+  // When embedded inside OfficeLink Layout, only render the internal content
+  if (embedded) {
+    return (
+      <div className={`transition-colors duration-200 font-sans ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+        {/* Internal tab navigator */}
+        <nav className={`no-print border-b mb-6 transition-colors duration-200 ${
+          isDark ? "border-slate-800" : "border-slate-200/80"
+        }`}>
+          <div className="flex space-x-1 overflow-x-auto scrollbar-none py-1.5">
+            <button onClick={() => setActiveTab("dashboard")} className={`px-4 py-2.5 text-xs md:text-sm font-bold rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "dashboard" ? "bg-teal-50/80 text-teal-800 border-b-2 border-teal-600" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"}`}>
+              <TrendingUp className="w-4 h-4 text-teal-600" /> Tableau de Bord
+            </button>
+            <button onClick={() => setActiveTab("new")} className={`px-4 py-2.5 text-xs md:text-sm font-bold rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "new" ? "bg-teal-50/80 text-teal-800 border-b-2 border-teal-600" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"}`}>
+              <PlusCircle className="w-4 h-4 text-teal-600" /> Consigner
+            </button>
+            <button onClick={() => setActiveTab("registry")} className={`px-4 py-2.5 text-xs md:text-sm font-bold rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "registry" ? "bg-teal-50/80 text-teal-800 border-b-2 border-teal-600" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"}`}>
+              <Table className="w-4 h-4 text-teal-600" /> Registre <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-200 text-slate-700">{interventions.length}</span>
+            </button>
+            <button onClick={() => setActiveTab("settings")} className={`px-4 py-2.5 text-xs md:text-sm font-bold rounded-lg flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${activeTab === "settings" ? "bg-teal-50/80 text-teal-800 border-b-2 border-teal-600" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"}`}>
+              <Settings className="w-4 h-4 text-teal-600" /> Préférences
+            </button>
+          </div>
+        </nav>
+
+        <AnimatePresence mode="popLayout">
+          {selectedIntervention && activeTab === "registry" && (
+            <motion.div initial={{ opacity: 0, y: -15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} className="mb-8 border rounded-2xl p-4 relative shadow-sm max-w-4xl mx-auto bg-teal-50/10 border-teal-150">
+              <button onClick={() => setSelectedIntervention(null)} className="absolute top-4 right-4 p-1 rounded-full cursor-pointer hover:shadow transition-all z-10 border bg-white border-slate-200 text-slate-405 hover:text-slate-600" title="Masquer">
+                <X className="w-4 h-4" />
+              </button>
+              <ProfessionalFiche intervention={selectedIntervention} onPrint={handlePrint} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence mode="wait">
+          {activeTab === "dashboard" && <motion.div key="dashboard" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}><StatsDashboard interventions={interventions} theme={theme} /></motion.div>}
+          {activeTab === "new" && <motion.div key="new" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}><NewInterventionForm onSave={handleSaveIntervention} techProfile={techProfile} theme={theme} interventions={interventions} /></motion.div>}
+          {activeTab === "registry" && <motion.div key="registry" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}><InterventionsRegistry interventions={interventions} onSelect={setSelectedIntervention} onDelete={handleDeleteIntervention} onToggleStatus={handleToggleStatus} theme={theme} /></motion.div>}
+          {activeTab === "settings" && <motion.div key="settings" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}><SettingsProfile techProfile={techProfile} onSaveProfile={handleSaveProfile} onExportData={handleExportData} onExportCSV={handleExportCSV} onImportData={handleImportData} onResetFactory={handleResetFactory} onClearData={handleClearData} localDirName={localDirName} onConnectDirectory={handleConnectDirectory} onDisconnectDirectory={handleDisconnectDirectory} theme={theme} onToggleTheme={handleToggleTheme} /></motion.div>}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {toast.visible && (
+            <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 30 }} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg border backdrop-blur-md text-xs font-semibold no-print max-w-sm w-[calc(100%-2rem)] bg-white border-teal-200 text-teal-800">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-teal-500" />
+              <div className="flex-1">{toast.message}</div>
+              <button onClick={() => setToast(prev => ({ ...prev, visible: false }))} className="p-0.5 rounded-full hover:bg-slate-200/20 text-slate-500"><X className="w-3.5 h-3.5" /></button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen transition-colors duration-200 flex flex-col font-sans ${isDark ? "bg-slate-950 text-slate-100" : "bg-slate-100 text-slate-900"}`}>
       <header className={`no-print relative border-b transition-colors duration-200 ${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
