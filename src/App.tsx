@@ -163,13 +163,42 @@ export default function App({ embedded = false }: AppProps) {
 
   // Fetch auth session on mount
   useEffect(() => {
+    // 1. Try to load cached session first for instant UI response
+    const cachedSessionStr = localStorage.getItem('officelink_session');
+    let cachedSession: Session | null = null;
+    if (cachedSessionStr) {
+      try {
+        cachedSession = JSON.parse(cachedSessionStr);
+        setSession(cachedSession);
+        setAuthLoading(false);
+      } catch (e) {
+        console.error("Failed to parse cached session in App", e);
+      }
+    }
+
     getSession().then((session) => {
-      setSession(session);
-      setAuthLoading(false);
+      if (session) {
+        setSession(session);
+        localStorage.setItem('officelink_session', JSON.stringify(session));
+      } else if (!cachedSession) {
+        setSession(null);
+        localStorage.removeItem('officelink_session');
+        setAuthLoading(false);
+      }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setSession(session);
+        localStorage.setItem('officelink_session', JSON.stringify(session));
+      } else {
+        // Only clear session if it was an explicit SIGNED_OUT or no cache exists
+        if (event === 'SIGNED_OUT' || !localStorage.getItem('officelink_session')) {
+          setSession(null);
+          localStorage.removeItem('officelink_session');
+          setAuthLoading(false);
+        }
+      }
     });
 
     return () => subscription.unsubscribe();

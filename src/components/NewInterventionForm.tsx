@@ -35,6 +35,10 @@ export default function NewInterventionForm({
   const [clientDepartment, setClientDepartment] = useState(DEPARTMENTS[0]);
   const [quickNotes, setQuickNotes] = useState("");
   
+  // Multi-beneficiary batch logging states
+  const [isMultiBeneficiary, setIsMultiBeneficiary] = useState(false);
+  const [beneficiaries, setBeneficiaries] = useState<{ name: string; title: string; department: string }[]>([]);
+  
   const [deviceType, setDeviceType] = useState(DEVICE_TYPES[0].value);
   const [deviceBrand, setDeviceBrand] = useState("");
   const [deviceInventory, setDeviceInventory] = useState("");
@@ -374,6 +378,28 @@ export default function NewInterventionForm({
     }
   };
 
+  const handleAddBeneficiaryToList = () => {
+    if (!clientName.trim()) {
+      alert("Veuillez saisir le nom du bénéficiaire avant de l'ajouter.");
+      return;
+    }
+    setBeneficiaries([
+      ...beneficiaries,
+      {
+        name: clientName.trim(),
+        title: clientTitle.trim() || "Collaborateur / Directeur",
+        department: clientDepartment
+      }
+    ]);
+    // Clear name and title for the next beneficiary
+    setClientName("");
+    setClientTitle("");
+  };
+
+  const handleRemoveBeneficiaryFromList = (index: number) => {
+    setBeneficiaries(beneficiaries.filter((_, i) => i !== index));
+  };
+
   const handleRefineWithIA = async () => {
     if (!rawNotes.trim()) {
       setAiError("Veuillez d'abord saisir vos notes d'intervention rapides/brutes ci-dessous.");
@@ -573,9 +599,24 @@ export default function NewInterventionForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientName.trim()) {
-      alert("Veuillez spécifier le nom du demandeur (Bénéficiaire).");
-      return;
+
+    let beneficiaryList = [];
+    if (isMultiBeneficiary) {
+      if (beneficiaries.length === 0) {
+        alert("Veuillez ajouter au moins un bénéficiaire à la liste.");
+        return;
+      }
+      beneficiaryList = [...beneficiaries];
+    } else {
+      if (!clientName.trim()) {
+        alert("Veuillez spécifier le nom du demandeur (Bénéficiaire).");
+        return;
+      }
+      beneficiaryList = [{
+        name: clientName.trim(),
+        title: clientTitle.trim() || "Collaborateur / Directeur",
+        department: clientDepartment
+      }];
     }
 
     // Default professional summary if empty
@@ -584,27 +625,30 @@ export default function NewInterventionForm({
       { description: rawNotes || "Prestation d'assistance informatique standard", category: "Autre" as const, status: "completed" as const }
     ];
 
-    onSave({
-      date,
-      clientName: clientName.trim(),
-      clientTitle: clientTitle.trim() || "Collaborateur / Directeur",
-      clientDepartment,
-      techName: techProfile?.name || "Technicien Informatique",
-      techTitle: techProfile?.title || "Support CNIPLC",
-      deviceType,
-      deviceBrand: deviceBrand.trim() || "Standard",
-      deviceInventory: deviceInventory.trim() || "N/A",
-      rawNotes: rawNotes.trim(),
-      quickNotes: quickNotes.trim(),
-      professionalSummary: actualSummary,
-      tasks: actualTasksParams.map((t, idx) => ({
-        ...t,
-        id: `task-${Date.now()}-${idx}`
-      })),
-      status,
-      durationMinutes,
-      photos,
-      signatureDate: status === "termine" ? date : undefined
+    // Save for each beneficiary
+    beneficiaryList.forEach((ben, index) => {
+      onSave({
+        date,
+        clientName: ben.name,
+        clientTitle: ben.title,
+        clientDepartment: ben.department,
+        techName: techProfile?.name || "Technicien Informatique",
+        techTitle: techProfile?.title || "Support CNIPLC",
+        deviceType,
+        deviceBrand: deviceBrand.trim() || "Standard",
+        deviceInventory: deviceInventory.trim() || "N/A",
+        rawNotes: rawNotes.trim(),
+        quickNotes: quickNotes.trim(),
+        professionalSummary: actualSummary,
+        tasks: actualTasksParams.map((t, idx) => ({
+          ...t,
+          id: `task-${Date.now()}-${index}-${idx}`
+        })),
+        status,
+        durationMinutes,
+        photos,
+        signatureDate: status === "termine" ? date : undefined
+      });
     });
 
     // Reset Form
@@ -617,6 +661,7 @@ export default function NewInterventionForm({
     setProfessionalSummary("");
     setTasks([]);
     setPhotos([]);
+    setBeneficiaries([]);
   };
 
   return (
@@ -752,26 +797,118 @@ export default function NewInterventionForm({
           </span>
         </h3>
 
+        {/* Multi-Beneficiary Toggle */}
+        <div className={`flex items-center justify-between rounded-lg px-4 py-3 mb-5 border transition-all duration-300 ${
+          isMultiBeneficiary
+            ? isDark ? "bg-gradient-to-r from-amber-950/40 to-orange-950/30 border-amber-500/30" : "bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200"
+            : isDark ? "bg-slate-950/40 border-slate-800" : "bg-slate-50 border-slate-200"
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm ${
+              isMultiBeneficiary
+                ? "bg-amber-500/20 text-amber-500"
+                : isDark ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-500"
+            }`}>
+              👥
+            </div>
+            <div>
+              <p className="text-sm font-bold">{isMultiBeneficiary ? "Mode Multi-Bénéficiaires Activé ⚡" : "Saisie Individuelle"}</p>
+              <p className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                {isMultiBeneficiary
+                  ? "Ajoutez plusieurs bénéficiaires, ils partageront la même intervention."
+                  : "Activer le mode multi pour consigner la même tâche pour plusieurs personnes."}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setIsMultiBeneficiary(!isMultiBeneficiary); setBeneficiaries([]); }}
+            className={`relative w-12 h-6 rounded-full transition-colors duration-300 cursor-pointer ${
+              isMultiBeneficiary ? "bg-amber-500" : isDark ? "bg-slate-700" : "bg-slate-300"
+            }`}
+          >
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform duration-300 ${
+              isMultiBeneficiary ? "translate-x-6" : "translate-x-0.5"
+            }`} />
+          </button>
+        </div>
+
+        {/* Multi-Beneficiary List Cards */}
+        {isMultiBeneficiary && beneficiaries.length > 0 && (
+          <div className="mb-5 space-y-2">
+            <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? "text-amber-400" : "text-amber-700"}`}>
+              {beneficiaries.length} bénéficiaire{beneficiaries.length > 1 ? "s" : ""} ajouté{beneficiaries.length > 1 ? "s" : ""} à cette intervention :
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {beneficiaries.map((ben, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 border transition-all duration-200 group ${
+                    isDark
+                      ? "bg-slate-950/60 border-slate-800 hover:border-amber-500/40"
+                      : "bg-white border-slate-200 hover:border-amber-300 shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-700"
+                    }`}>
+                      {ben.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold truncate">{ben.name}</p>
+                      <p className={`text-[10px] truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                        {ben.title} — {ben.department}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveBeneficiaryFromList(idx)}
+                    className="text-red-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer shrink-0"
+                    title="Retirer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Client Name */}
           <div className="space-y-1.5">
             <label className={`block text-xs font-semibold uppercase tracking-wider ${
               isDark ? "text-slate-300" : "text-slate-700"
             }`}>
-              Nom complet du Bénéficiaire *
+              {isMultiBeneficiary ? "Nom du prochain bénéficiaire" : "Nom complet du Bénéficiaire *"}
             </label>
-            <input
-              id="input-client-name"
-              type="text"
-              required
-              placeholder="Sélectionner ou saisir..."
-              value={clientName}
-              onChange={handleClientNameChange}
-              list="employees-list"
-              className={`w-full text-sm px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
-                isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-650" : "bg-white border-slate-200 text-slate-800"
-              }`}
-            />
+            <div className="flex gap-2">
+              <input
+                id="input-client-name"
+                type="text"
+                required={!isMultiBeneficiary}
+                placeholder="Sélectionner ou saisir..."
+                value={clientName}
+                onChange={handleClientNameChange}
+                list="employees-list"
+                className={`flex-1 text-sm px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                  isDark ? "bg-slate-950 border-slate-800 text-white placeholder:text-slate-650" : "bg-white border-slate-200 text-slate-800"
+                }`}
+              />
+              {isMultiBeneficiary && (
+                <button
+                  type="button"
+                  onClick={handleAddBeneficiaryToList}
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white transition-colors cursor-pointer shadow-sm whitespace-nowrap"
+                  title="Ajouter ce bénéficiaire à la liste"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Ajouter</span>
+                </button>
+              )}
+            </div>
             <datalist id="employees-list">
               {employees.map((emp) => (
                 <option key={emp.id || emp.name} value={emp.name}>

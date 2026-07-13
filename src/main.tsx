@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage.tsx';
 import ChatPage from './pages/ChatPage.tsx';
 import FilesPage from './pages/FilesPage.tsx';
 import AdminPage from './pages/AdminPage.tsx';
+import StudioIAPage from './pages/StudioIAPage.tsx';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -24,6 +25,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="chat" element={<ChatPage />} />
           <Route path="files" element={<FilesPage />} />
           <Route path="admin" element={<AdminPage />} />
+          <Route path="studio-ia" element={<StudioIAPage />} />
         </Route>
 
         {/* Redirections pour la compatibilité et les anciens favoris */}

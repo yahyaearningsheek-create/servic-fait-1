@@ -17,7 +17,7 @@ const PORT = 3000;
 app.use(express.json());
 
 // Initialize Google GenAI or Nvidia LLM API keys
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "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";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "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";
 
 let ai: GoogleGenAI | null = null;
 const isNvidiaKey = GEMINI_API_KEY.startsWith("nvapi-");
@@ -412,6 +412,241 @@ app.post("/api/parse-voice", async (req: Request, res: Response): Promise<void> 
       { description: "Mise à niveau et contrôle de la mémoire vive (RAM)", category: "Matériel" }
     ]
   });
+});
+
+// Endpoint to handle Studio IA features (translation, natural commands, OCR simulation)
+app.post("/api/studio-ai", async (req: Request, res: Response): Promise<void> => {
+  const { actionType, command, text, layers } = req.body;
+
+  if (actionType === "translate") {
+    if (!text || typeof text !== "string") {
+      res.status(400).json({ error: "Le texte est requis pour la traduction." });
+      return;
+    }
+    if (isNvidiaKey) {
+      try {
+        const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GEMINI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: "meta/llama-3.1-70b-instruct",
+            messages: [
+              { role: "system", content: "You are a professional translator. Translate the given text to English. Keep the original tone, speech bubble style, and punctuation intact. Only return the translated text without quotes or explanations." },
+              { role: "user", content: text }
+            ],
+            temperature: 0.2,
+            max_tokens: 1024
+          })
+        });
+        if (response.ok) {
+          const nvData = await response.json();
+          const translated = nvData?.choices?.[0]?.message?.content?.trim();
+          if (translated) {
+            res.json({ translatedText: translated });
+            return;
+          }
+        }
+      } catch (nvErr) {
+        console.error("[Studio AI] NVIDIA Translation Error:", nvErr);
+      }
+    }
+    if (ai) {
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: `Translate the following text into English, keeping the original tone, speech bubble style, and punctuation intact. Only return the translated text without quotes or explanations:\n\n"${text}"`,
+        });
+        res.json({ translatedText: response.text?.trim() });
+        return;
+      } catch (err) {
+        console.error("Gemini translation error:", err);
+      }
+    }
+    res.json({ translatedText: `[EN] ${text}` });
+    return;
+  }
+
+  if (actionType === "natural_command") {
+    if (!command || typeof command !== "string") {
+      res.status(400).json({ error: "La commande naturelle est requise." });
+      return;
+    }
+    if (isNvidiaKey) {
+      try {
+        const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GEMINI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: "meta/llama-3.1-70b-instruct",
+            messages: [
+              {
+                role: "system",
+                content: `Vous êtes un assistant IA pour un studio d'édition graphique de bandes dessinées et livres. L'utilisateur donne des commandes en français pour modifier ses images. Analysez la commande et renvoyez un objet JSON strict avec: 'explanation' (string, explication en français) et 'actions' (array d'objets avec 'type' parmi: update_layer_text, add_layer, delete_layer, apply_filter, extend_canvas, retouch). Chaque action peut avoir: layerId, newText, layerType, content, x, y, filterType, value, targetRatio, tool.`
+              },
+              {
+                role: "user",
+                content: `Commande: "${command}". Calques actuels: ${JSON.stringify(layers || [])}`
+              }
+            ],
+            temperature: 0.2,
+            max_tokens: 1024,
+            response_format: { type: "json_object" }
+          })
+        });
+        if (response.ok) {
+          const nvData = await response.json();
+          const contentText = nvData?.choices?.[0]?.message?.content;
+          if (contentText) {
+            let cleaned = contentText.trim();
+            if (cleaned.startsWith("```")) {
+              cleaned = cleaned.replace(/^```json/i, "").replace(/```$/s, "").trim();
+            }
+            res.json(JSON.parse(cleaned));
+            return;
+          }
+        }
+      } catch (nvErr) {
+        console.error("[Studio AI] NVIDIA Command Error:", nvErr);
+      }
+    }
+    if (ai) {
+      try {
+        const prompt = `L'utilisateur a donné cette commande pour modifier son image/planches de BD/livre : "${command}".
+        Voici la liste actuelle des calques (sous forme JSON) : ${JSON.stringify(layers || [])}.
+        
+        Analysez la commande et déterminez les modifications à effectuer. Vous devez renvoyer un objet JSON contenant :
+        1. 'explanation': une explication de ce que l'IA a compris et va faire (en français).
+        2. 'actions': un tableau d'actions à exécuter. Chaque action doit avoir :
+           - 'type': l'un des types suivants :
+             * 'update_layer_text' (mettre à jour le texte d'un calque existant, requiert 'layerId' et 'newText')
+             * 'add_layer' (ajouter un calque, requiert 'layerType' ('text' | 'bubble' | 'character' | 'decor'), 'content', et des coordonnées optionnelles 'x', 'y')
+             * 'delete_layer' (supprimer un calque, requiert 'layerId')
+             * 'apply_filter' (appliquer un filtre d'image global, requiert 'filterType' ('denoise' | 'sharpen' | 'contrast' | 'brightness' | 'grayscale' | 'sepia') et 'value')
+             * 'extend_canvas' (étendre l'image, requiert 'targetRatio' ('A4' | 'A3' | 'A5' | 'carré' | 'portrait' | 'paysage'))
+             * 'retouch' (retouche, requiert 'tool' ('recolor' | 'restore' | 'clean' | 'colorise'))
+           - 'layerId': l'ID du calque à modifier (optionnel)
+           - 'newText': le nouveau texte (optionnel)
+           - 'layerType': le type de calque à ajouter (optionnel)
+           - 'content': le contenu textuel ou description (optionnel)
+           - 'x', 'y': positions (optionnel)
+           - 'filterType': type de filtre (optionnel)
+           - 'value': valeur ou booléen (optionnel)
+           - 'targetRatio': ratio cible (optionnel)
+           - 'tool': outil de retouche (optionnel)
+           
+        Retournez uniquement cet objet JSON strict.`;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                explanation: { type: Type.STRING },
+                actions: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: { type: Type.STRING },
+                      layerId: { type: Type.STRING },
+                      newText: { type: Type.STRING },
+                      layerType: { type: Type.STRING },
+                      content: { type: Type.STRING },
+                      x: { type: Type.NUMBER },
+                      y: { type: Type.NUMBER },
+                      filterType: { type: Type.STRING },
+                      value: { type: Type.STRING },
+                      targetRatio: { type: Type.STRING },
+                      tool: { type: Type.STRING }
+                    },
+                    required: ["type"]
+                  }
+                }
+              },
+              required: ["explanation", "actions"]
+            }
+          }
+        });
+
+        const outputText = response.text;
+        if (outputText) {
+          res.json(JSON.parse(outputText.trim()));
+          return;
+        }
+      } catch (err) {
+        console.error("Gemini natural command parsing error:", err);
+      }
+    }
+
+    // Heuristic command parser fallback
+    const explanation = `Commande "${command}" interprétée localement.`;
+    const actions: any[] = [];
+    const lowerCmd = command.toLowerCase();
+
+    if (lowerCmd.includes("tradui") || lowerCmd.includes("anglais") || lowerCmd.includes("english")) {
+      if (layers && Array.isArray(layers)) {
+        layers.forEach((l: any) => {
+          if (l.type === "text" || l.type === "bubble") {
+            actions.push({
+              type: "update_layer_text",
+              layerId: l.id,
+              newText: `[EN] Translated text`
+            });
+          }
+        });
+      }
+    } else if (lowerCmd.includes("amélior") || lowerCmd.includes("professionnel") || lowerCmd.includes("netteté")) {
+      actions.push({ type: "apply_filter", filterType: "sharpen", value: "true" });
+      actions.push({ type: "apply_filter", filterType: "denoise", value: "true" });
+      actions.push({ type: "apply_filter", filterType: "contrast", value: "high" });
+    } else if (lowerCmd.includes("ciel") || lowerCmd.includes("remplace")) {
+      actions.push({ type: "add_layer", layerType: "decor", content: "Ciel bleu professionnel", x: 40, y: 10 });
+    } else if (lowerCmd.includes("cadre") || lowerCmd.includes("bordure")) {
+      actions.push({ type: "apply_filter", filterType: "border", value: "elegant" });
+    } else if (lowerCmd.includes("supprim") && (lowerCmd.includes("fond") || lowerCmd.includes("arrière-plan"))) {
+      const bgLayer = layers?.find((l: any) => l.type === "decor" || l.name?.toLowerCase().includes("fond"));
+      if (bgLayer) {
+        actions.push({ type: "delete_layer", layerId: bgLayer.id });
+      }
+    } else if (lowerCmd.includes("agrandi") || lowerCmd.includes("étendre") || lowerCmd.includes("a4") || lowerCmd.includes("a3")) {
+      const targetRatio = lowerCmd.includes("a3") ? "A3" : lowerCmd.includes("a4") ? "A4" : "A4";
+      actions.push({ type: "extend_canvas", targetRatio });
+    } else if (lowerCmd.includes("pagination") || lowerCmd.includes("numéro")) {
+      actions.push({ type: "add_layer", layerType: "text", content: "Page 1", x: 45, y: 95 });
+    }
+
+    res.json({ explanation, actions });
+    return;
+  }
+
+  if (actionType === "ocr") {
+    res.json({
+      panels: [
+        { id: "panel-1", x: 5, y: 5, width: 90, height: 40 },
+        { id: "panel-2", x: 5, y: 50, width: 43, height: 45 },
+        { id: "panel-3", x: 52, y: 50, width: 43, height: 45 }
+      ],
+      layers: [
+        { id: "layer-bg", type: "decor", name: "Arrière-plan original", visible: true, locked: true, opacity: 100 },
+        { id: "layer-char-1", type: "character", name: "Personnage principal", visible: true, locked: false, opacity: 100, x: 15, y: 15, width: 30, height: 30 },
+        { id: "layer-char-2", type: "character", name: "Personnage secondaire", visible: true, locked: false, opacity: 100, x: 60, y: 55, width: 25, height: 35 },
+        { id: "layer-bubble-1", type: "bubble", name: "Bulle Dialogue 1", visible: true, locked: false, opacity: 100, x: 45, y: 10, width: 35, height: 15, text: "Bienvenue dans le Studio IA !" },
+        { id: "layer-bubble-2", type: "bubble", name: "Bulle Dialogue 2", visible: true, locked: false, opacity: 100, x: 10, y: 55, width: 35, height: 15, text: "C'est magique !" }
+      ]
+    });
+    return;
+  }
+
+  res.status(400).json({ error: "Type d'action non supporté." });
 });
 
 // Start server

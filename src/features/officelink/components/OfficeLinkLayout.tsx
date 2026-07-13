@@ -2,7 +2,8 @@ import React, { useState, useEffect, ErrorInfo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { 
   Network, MessageSquare, Files, Activity, Menu, X, Power, 
-  AlertTriangle, CheckCircle2, Loader2, Settings, ShieldAlert, Check, RefreshCw
+  AlertTriangle, CheckCircle2, Loader2, Settings, ShieldAlert, Check, RefreshCw, Download,
+  Palette
 } from 'lucide-react';
 import { supabase, getSession } from '../../../lib/supabase';
 import { Session } from '@supabase/supabase-js';
@@ -18,11 +19,13 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-class OfficeLinkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class OfficeLinkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState & { retryCount: number }> {
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(props: ErrorBoundaryProps) {
     super(props);
     // @ts-ignore
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, retryCount: 0 };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
@@ -31,27 +34,37 @@ class OfficeLinkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorB
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('[OfficeLink] Erreur de rendu capturée:', error, errorInfo);
+    // @ts-ignore
+    const currentRetry = this.state.retryCount || 0;
+    // Auto-recover: silently retry up to 3 times with increasing delay
+    if (currentRetry < 3) {
+      this.retryTimer = setTimeout(() => {
+        // @ts-ignore
+        this.setState({ hasError: false, error: null, retryCount: currentRetry + 1 });
+      }, 1000 * (currentRetry + 1));
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
   }
 
   render() {
     // @ts-ignore
-    if (this.state.hasError) {
+    if (this.state.hasError && (this.state.retryCount || 0) >= 3) {
+      // Only show error screen after 3 failed auto-recovery attempts
       return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
-          <div className="max-w-md w-full p-8 rounded-2xl shadow-2xl border border-red-500/20 bg-slate-800/80 backdrop-blur-lg text-center space-y-6">
-            <div className="mx-auto w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-400 border border-red-500/20">
-              <AlertTriangle className="w-8 h-8" />
+          <div className="max-w-md w-full p-8 rounded-2xl shadow-2xl border border-blue-500/20 bg-slate-800/80 backdrop-blur-lg text-center space-y-6">
+            <div className="mx-auto w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 border border-blue-500/20">
+              <RefreshCw className="w-8 h-8" />
             </div>
-            <h2 className="text-xl font-bold text-white">Erreur de l'application</h2>
-            <p className="text-sm text-slate-400">Une erreur inattendue s'est produite dans OfficeLink.</p>
-            <div className="p-3 rounded-lg bg-red-950/30 border border-red-900/20 text-red-300 text-xs font-mono text-left overflow-auto max-h-32">
-              {/* @ts-ignore */}
-              {this.state.error?.message || 'Erreur inconnue'}
-            </div>
+            <h2 className="text-xl font-bold text-white">Reconnexion en cours...</h2>
+            <p className="text-sm text-slate-400">OfficeLink rencontre un problème de connexion. Veuillez recharger la page.</p>
             <button
               onClick={() => {
                 // @ts-ignore
-                this.setState({ hasError: false, error: null });
+                this.setState({ hasError: false, error: null, retryCount: 0 });
                 window.location.reload();
               }}
               className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
@@ -60,6 +73,16 @@ class OfficeLinkErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorB
               Recharger la page
             </button>
           </div>
+        </div>
+      );
+    }
+    // @ts-ignore
+    if (this.state.hasError) {
+      // Auto-recovery in progress, show loading spinner
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 gap-4">
+          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <p className="text-slate-400 text-xs font-semibold">Reconnexion automatique...</p>
         </div>
       );
     }
@@ -95,21 +118,48 @@ export default function OfficeLinkLayout() {
   const [checkingBlock, setCheckingBlock] = useState(true);
 
   useEffect(() => {
+    // 1. Try to load cached session first for instant UI response without flashing login
+    const cachedSessionStr = localStorage.getItem('officelink_session');
+    let cachedSession: Session | null = null;
+    if (cachedSessionStr) {
+      try {
+        cachedSession = JSON.parse(cachedSessionStr);
+        setSession(cachedSession);
+        setAuthLoading(false);
+      } catch (e) {
+        console.error("Failed to parse cached session", e);
+      }
+    }
+
     getSession().then((s) => {
-      setSession(s);
-      if (!s) {
+      if (s) {
+        setSession(s);
+        localStorage.setItem('officelink_session', JSON.stringify(s));
+      } else if (!cachedSession) {
+        setSession(null);
+        localStorage.removeItem('officelink_session');
         setAuthLoading(false);
         setCheckingBlock(false);
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (!session) {
-        setAuthLoading(false);
-        setCheckingBlock(false);
-        setIsBlocked(false);
-        setBlockedReason('');
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+      console.log("[OfficeLink Auth Event]:", event);
+      if (s) {
+        setSession(s);
+        localStorage.setItem('officelink_session', JSON.stringify(s));
+      } else {
+        // Only clear session and redirect to login if it was an explicit SIGNED_OUT
+        // or if there is no cached session. This prevents temporary network disconnects
+        // from signing the user out.
+        if (event === 'SIGNED_OUT' || !localStorage.getItem('officelink_session')) {
+          setSession(null);
+          localStorage.removeItem('officelink_session');
+          setAuthLoading(false);
+          setCheckingBlock(false);
+          setIsBlocked(false);
+          setBlockedReason('');
+        }
       }
     });
 
@@ -228,6 +278,7 @@ export default function OfficeLinkLayout() {
   };
 
   const handleLogout = async () => {
+    localStorage.removeItem('officelink_session');
     await supabase.auth.signOut();
   };
 
@@ -342,7 +393,7 @@ export default function OfficeLinkLayout() {
           <div className="pt-4 border-t border-slate-800">
             <button
               onClick={handleLogout}
-              className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-355 font-bold rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2 text-sm shadow-inner"
+              className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2 text-sm shadow-inner"
             >
               <Power className="w-4 h-4 text-red-400" />
               Se déconnecter
@@ -365,16 +416,40 @@ export default function OfficeLinkLayout() {
 function OfficeLinkLayoutContent({ session }: { session: Session }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const { activeTransfers, peerMetadata, acceptTransfer, rejectTransfer } = useWebRTC();
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const { 
+    activeTransfers, 
+    peerMetadata, 
+    acceptTransfer, 
+    rejectTransfer,
+    messages,
+    toasts,
+    dismissToast
+  } = useWebRTC();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
 
+  const myEmail = session?.user?.email || '';
+  const unreadCount = messages.filter(m => m.senderEmail !== myEmail && m.status !== 'read').length;
+
   const navLinks = [
     { name: 'Dashboard', path: '/officelink', icon: Activity },
-    { name: 'Chat (P2P)', path: '/officelink/chat', icon: MessageSquare },
+    { name: 'Studio IA', path: '/officelink/studio-ia', icon: Palette },
+    { name: 'Chat (P2P)', path: '/officelink/chat', icon: MessageSquare, badge: unreadCount },
     { name: 'Fichiers LAN', path: '/officelink/files', icon: Files },
     { name: 'Administration', path: '/officelink/admin', icon: Settings },
   ];
@@ -448,6 +523,11 @@ function OfficeLinkLayoutContent({ session }: { session: Session }) {
               >
                 <Icon size={18} />
                 <span className="font-medium">{link.name}</span>
+                {link.badge !== undefined && link.badge > 0 && (
+                  <span className="ml-auto bg-red-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full animate-pulse">
+                    {link.badge}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -503,10 +583,17 @@ function OfficeLinkLayoutContent({ session }: { session: Session }) {
                     key={link.name}
                     to={link.path}
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg ${isActive ? 'bg-blue-50 text-blue-600 font-bold' : 'hover:bg-slate-50 text-slate-700'}`}
+                    className={`flex items-center justify-between px-4 py-3 rounded-lg ${isActive ? 'bg-blue-50 text-blue-600 font-bold' : 'hover:bg-slate-50 text-slate-700'}`}
                   >
-                    <Icon size={18} />
-                    <span>{link.name}</span>
+                    <div className="flex items-center gap-3">
+                      <Icon size={18} />
+                      <span>{link.name}</span>
+                    </div>
+                    {link.badge !== undefined && link.badge > 0 && (
+                      <span className="bg-red-500 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-full animate-pulse">
+                        {link.badge}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -514,9 +601,58 @@ function OfficeLinkLayoutContent({ session }: { session: Session }) {
           </div>
         )}
 
+        {/* Network connection warning */}
+        {!isOnline && (
+          <div className="bg-red-500 text-white px-4 py-2.5 text-center text-xs font-bold flex items-center justify-center gap-2 shrink-0 animate-in slide-in-from-top-4">
+            <ShieldAlert className="w-4 h-4 animate-bounce" />
+            Mode Hors-ligne : Connexion réseau LAN perdue.
+          </div>
+        )}
+
         <main className="flex-1 overflow-auto bg-slate-50 p-4 md:p-8">
-          <Outlet />
+          <div key={location.pathname} className="animate-fade-in h-full flex flex-col">
+            <Outlet />
+          </div>
         </main>
+      </div>
+
+      {/* Global Toast Notification container */}
+      <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-xl shadow-xl border transition-all duration-300 animate-in slide-in-from-bottom-4 ${
+              toast.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : toast.type === 'error'
+                ? 'bg-red-50 border-red-200 text-red-800'
+                : toast.type === 'warning'
+                ? 'bg-amber-50 border-amber-200 text-amber-800'
+                : 'bg-white border-slate-200 text-slate-800'
+            }`}
+          >
+            <div className="flex-1">
+              <p className="text-xs font-semibold leading-relaxed">{toast.message}</p>
+              {toast.fileUrl && (
+                <a
+                  href={toast.fileUrl}
+                  download={toast.downloadName || 'fichier'}
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Télécharger le fichier
+                </a>
+              )}
+            </div>
+            <button
+              onClick={() => dismissToast(toast.id)}
+              className="p-0.5 rounded-full hover:bg-black/5 text-slate-400 hover:text-slate-655 transition-colors shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

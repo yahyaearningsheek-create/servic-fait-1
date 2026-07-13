@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { useWebRTC, formatSize } from '../features/officelink/hooks/useWebRTC';
 import { 
   UploadCloud, File, Download, Search, HardDrive, Play, Pause, XCircle, 
-  CheckCircle2, Laptop, User, ShieldAlert, Check, X, ArrowRight, ArrowLeftRight, Loader2
+  CheckCircle2, Laptop, User, ShieldAlert, Check, X, ArrowRight, ArrowLeftRight, Loader2,
+  FileText, FileImage, FileVideo, FileAudio, Archive
 } from 'lucide-react';
 
 export default function FilesPage() {
@@ -50,7 +51,8 @@ export default function FilesPage() {
     connectToPeer,
     isPeerConnected,
     downloadDirectoryHandle,
-    selectDownloadDirectory
+    selectDownloadDirectory,
+    showToast
   } = useWebRTC();
 
   // Trigger connection when peers are selected
@@ -60,35 +62,68 @@ export default function FilesPage() {
     });
   }, [selectedPeerIds, connectToPeer]);
 
-  const processFile = (file: File) => {
-    if (file.size > 200 * 1024 * 1024) {
-      alert("Le fichier est trop volumineux. La limite professionnelle est de 200 Mo.");
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    const sizeClass = "w-4 h-4";
+    if (!ext) return <File className={sizeClass} />;
+    
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) {
+      return <FileImage className={sizeClass} />;
+    }
+    if (['mp4', 'avi', 'mov', 'wmv', 'mkv', 'flv', 'webm'].includes(ext)) {
+      return <FileVideo className={sizeClass} />;
+    }
+    if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(ext)) {
+      return <FileAudio className={sizeClass} />;
+    }
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(ext)) {
+      return <Archive className={sizeClass} />;
+    }
+    if (['txt', 'csv', 'json', 'xml', 'html', 'css', 'js', 'ts', 'jsx', 'tsx', 'py', 'sh', 'md'].includes(ext)) {
+      return <FileText className={sizeClass} />;
+    }
+    if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
+      return <FileText className={sizeClass} />;
+    }
+    return <File className={sizeClass} />;
+  };
+
+  const processFiles = (files: File[]) => {
+    if (files.length === 0) return;
+    
+    const oversized = files.filter(f => f.size > 200 * 1024 * 1024);
+    if (oversized.length > 0) {
+      showToast(`${oversized.length} fichier(s) dépassent la limite autorisée de 200 Mo.`, "error");
       return;
     }
-    
-    selectedPeerIds.forEach(peerId => {
-      sendFile(peerId, file, transferPriority);
+
+    files.forEach(file => {
+      selectedPeerIds.forEach(peerId => {
+        sendFile(peerId, file, transferPriority);
+      });
     });
+    showToast(`${files.length} fichier(s) mis en file d'attente de transfert.`, "success");
   };
 
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    setIsDragging(false);
     if (selectedPeerIds.length === 0) {
-      alert("Veuillez d'abord sélectionner au moins un appareil destinataire dans la liste.");
+      showToast("Veuillez d'abord sélectionner au moins un appareil destinataire dans la liste.", "warning");
       return;
     }
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(Array.from(e.dataTransfer.files));
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (selectedPeerIds.length === 0) {
-      alert("Veuillez d'abord sélectionner au moins un appareil destinataire dans la liste.");
+      showToast("Veuillez d'abord sélectionner au moins un appareil destinataire dans la liste.", "warning");
       return;
     }
-    if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      processFiles(Array.from(e.target.files));
       e.target.value = ''; // Reset input
     }
   };
@@ -268,9 +303,9 @@ export default function FilesPage() {
                 {(['high', 'normal', 'low'] as const).map((prio) => {
                   const labelMap = { high: 'Haute (Prioritaire)', normal: 'Normale', low: 'Basse (Arrière-plan)' };
                   const colorMap = {
-                    high: 'border-red-205 text-red-700 hover:bg-red-50 bg-red-50/20',
-                    normal: 'border-blue-205 text-blue-700 hover:bg-blue-50 bg-blue-50/20',
-                    low: 'border-slate-205 text-slate-750 hover:bg-slate-50 bg-slate-50/20'
+                    high: 'border-red-200 text-red-705 hover:bg-red-50 bg-red-50/20',
+                    normal: 'border-blue-200 text-blue-700 hover:bg-blue-50 bg-blue-50/20',
+                    low: 'border-slate-200 text-slate-700 hover:bg-slate-50 bg-slate-50/20'
                   };
                   const activeMap = {
                     high: 'ring-2 ring-red-500 border-red-500 bg-red-50 text-red-950 font-bold',
@@ -320,7 +355,8 @@ export default function FilesPage() {
                 onChange={handleFileSelect}
                 className="hidden"
                 disabled={selectedPeerIds.length === 0}
-                accept=".mp4,.avi,.mov,.wmv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,image/*,audio/*"
+                multiple
+                accept=".mp4,.avi,.mov,.wmv,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.zip,.rar,.7z,.tar,.gz,.txt,.csv,.json,.xml,image/*,audio/*"
               />
               <UploadCloud className={`w-12 h-12 mb-4 transition-transform duration-300 ${
                 selectedPeerIds.length > 0 ? (isDragging ? 'text-blue-600 scale-110' : 'text-blue-500') : 'text-slate-400'
@@ -337,7 +373,7 @@ export default function FilesPage() {
             <div className="mt-6 flex-1 overflow-y-auto space-y-4 pr-1">
               <h4 className="font-bold text-slate-700 text-xs uppercase tracking-wider mb-2">Transferts Actifs</h4>
               {runningTransfers.length === 0 ? (
-                <p className="text-slate-400 text-xs py-6 text-center border border-dashed border-slate-100 rounded-xl bg-slate-50/30">Aucun transfert actif.</p>
+<p className="text-slate-400 text-xs py-6 text-center border border-dashed border-slate-100 rounded-xl bg-slate-50/30">Aucun transfert actif.</p>
               ) : (
                 runningTransfers.map(transfer => {
                   const peerMeta = peerMetadata[transfer.peerId];
@@ -358,21 +394,21 @@ export default function FilesPage() {
                             {transfer.priority && (
                               <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
                                 transfer.priority === 'high' 
-                                  ? 'bg-red-50 border border-red-150 text-red-650' 
+                                  ? 'bg-red-50 border border-red-200 text-red-700' 
                                   : transfer.priority === 'low'
                                   ? 'bg-slate-100 border border-slate-200 text-slate-600'
-                                  : 'bg-blue-50 border border-blue-150 text-blue-650'
+                                  : 'bg-blue-50 border border-blue-200 text-blue-700'
                               }`}>
                                 Prio: {transfer.priority === 'high' ? 'Haute' : transfer.priority === 'low' ? 'Basse' : 'Normale'}
                               </span>
                             )}
                             {transfer.status === 'transferring' && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-50 border border-teal-150 text-teal-650">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
                                 Segment: {transfer.speed > 5 * 1024 * 1024 ? '4 Mo' : transfer.speed < 500 * 1024 ? '1 Mo' : '2 Mo'}
                               </span>
                             )}
                             {transfer.sha256 && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-50 border border-slate-250 text-slate-500 font-mono" title={transfer.sha256}>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-50 border border-slate-200 text-slate-500 font-mono" title={transfer.sha256}>
                                 SHA-256: {transfer.sha256.substring(0, 8)}...
                               </span>
                             )}
@@ -418,8 +454,8 @@ export default function FilesPage() {
                           <span>Signature SHA-256 en cours de calcul...</span>
                         </div>
                       ) : transfer.status === 'verifying_sha256' ? (
-                        <div className="flex items-center gap-2 text-xs text-indigo-650 font-semibold bg-indigo-50 border border-indigo-100 p-2 rounded-lg">
-                          <Loader2 className="w-4 h-4 shrink-0 animate-spin text-indigo-650" />
+                        <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold bg-indigo-50 border border-indigo-200 p-2 rounded-lg">
+                          <Loader2 className="w-4 h-4 shrink-0 animate-spin text-indigo-600" />
                           <span>Validation de la signature SHA-256 en cours...</span>
                         </div>
                       ) : transfer.status === 'pending_accept' ? (
@@ -490,7 +526,7 @@ export default function FilesPage() {
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                           isSuccess ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-500'
                         }`}>
-                          <File className="w-4 h-4" />
+                          {getFileIcon(transfer.fileName)}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-bold text-slate-800 truncate" title={transfer.fileName}>{transfer.fileName}</p>

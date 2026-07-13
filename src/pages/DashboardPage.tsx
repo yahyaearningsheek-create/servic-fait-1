@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useWebRTC } from '../features/officelink/hooks/useWebRTC';
+import { useWebRTC, formatSize, getOS, getLocalIPMock } from '../features/officelink/hooks/useWebRTC';
 import { getSession } from '../lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { 
   Laptop, Activity, MessageSquare, Files, ShieldCheck, 
-  Smartphone, Monitor, HelpCircle, ArrowRight, UserCheck, Network, Globe
+  Smartphone, Monitor, HelpCircle, ArrowRight, Network, Globe
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -15,7 +15,7 @@ export default function DashboardPage() {
     getSession().then((s) => setSession(s));
   }, []);
 
-  const { onlinePeers, peerMetadata } = useWebRTC();
+  const { onlinePeers, peerMetadata, activeTransfers } = useWebRTC();
 
   const getOSIcon = (os: string) => {
     switch (os.toLowerCase()) {
@@ -35,12 +35,12 @@ export default function DashboardPage() {
   const getOSBadgeColor = (os: string) => {
     switch (os.toLowerCase()) {
       case 'windows':
-        return 'bg-blue-50 text-blue-700 border-blue-150';
+        return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'macos':
         return 'bg-slate-50 text-slate-750 border-slate-200';
       case 'linux':
       case 'android':
-        return 'bg-emerald-50 text-emerald-700 border-emerald-150';
+        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       default:
         return 'bg-slate-50 text-slate-500 border-slate-200';
     }
@@ -55,6 +55,13 @@ export default function DashboardPage() {
     nom_appareil: peerMetadata[peerId]?.nom_appareil || 'Appareil distant',
     systeme_exploitation: peerMetadata[peerId]?.systeme_exploitation || 'Inconnu',
   }));
+
+  const completedTransfers = activeTransfers.filter(t => t.status === 'completed');
+  const totalVolume = completedTransfers.reduce((acc, t) => acc + t.fileSize, 0);
+  const activeCount = activeTransfers.filter(t => t.status === 'transferring' || t.status === 'calculating_sha256' || t.status === 'verifying_sha256').length;
+
+  const chartData = [10, 25, 45, 30, 55, 70, 60, 85, 90];
+  const chartPath = chartData.map((val, idx) => `${idx * 40},${100 - val}`).join(' L ');
 
   return (
     <div className="space-y-8">
@@ -87,33 +94,81 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-400/50 transition-all group flex justify-between items-start">
-          <div className="space-y-2">
-            <h3 className="font-semibold text-slate-500 text-sm">Partage Direct (P2P)</h3>
-            <p className="text-4xl font-extrabold text-emerald-600 group-hover:scale-105 transition-transform origin-left">
-              Actif
-            </p>
-            <p className="text-xs text-slate-400">Zéro stockage cloud</p>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-blue-400/50 transition-all flex flex-col justify-between">
+          <div className="flex justify-between items-start">
+            <div className="space-y-2">
+              <h3 className="font-semibold text-slate-500 text-sm">Volume Transféré</h3>
+              <p className="text-4xl font-extrabold text-blue-655">
+                {formatSize(totalVolume)}
+              </p>
+              <p className="text-xs text-slate-400">{completedTransfers.length} fichier(s) reçu(s)</p>
+            </div>
+            <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 border border-blue-100">
+              <Files className="w-6 h-6" />
+            </div>
           </div>
-          <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 border border-emerald-100">
-            <Files className="w-6 h-6" />
+          {/* SVG Sparkline chart */}
+          <div className="w-full h-12 mt-4 overflow-hidden rounded-lg bg-blue-50/10 shrink-0">
+            <svg className="w-full h-full" viewBox="0 0 320 100" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="gradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#2563eb" stopOpacity="0.2"/>
+                  <stop offset="100%" stopColor="#2563eb" stopOpacity="0"/>
+                </linearGradient>
+              </defs>
+              <path
+                d={`M 0,100 L 0,90 L ${chartPath} L 320,100 Z`}
+                fill="url(#gradient)"
+              />
+              <path
+                d={`M 0,90 L ${chartPath}`}
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+            </svg>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-indigo-400/50 transition-all group flex justify-between items-start">
-          <div className="space-y-2">
-            <h3 className="font-semibold text-slate-500 text-sm">Messagerie Instantanée</h3>
-            <p className="text-4xl font-extrabold text-indigo-600 group-hover:scale-105 transition-transform origin-left">
-              Sécurisée
-            </p>
-            <p className="text-xs text-slate-400">Cryptage bout-en-bout</p>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-400/50 transition-all flex flex-col justify-between">
+          <div className="flex justify-between items-start">
+            <div className="space-y-2">
+              <h3 className="font-semibold text-slate-500 text-sm">Activité Transfert</h3>
+              <p className="text-4xl font-extrabold text-emerald-600">
+                {activeCount > 0 ? `${activeCount} Actif(s)` : 'Inactif'}
+              </p>
+              <p className="text-xs text-slate-400">Canaux P2P LAN ouverts</p>
+            </div>
+            <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 border border-emerald-100">
+              <Activity className="w-6 h-6" />
+            </div>
           </div>
-          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 border border-indigo-100">
-            <MessageSquare className="w-6 h-6" />
+          {/* SVG Sparkline chart 2 */}
+          <div className="w-full h-12 mt-4 overflow-hidden rounded-lg bg-emerald-50/10 shrink-0">
+            <svg className="w-full h-full" viewBox="0 0 320 100" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="gradient-emerald" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.2"/>
+                  <stop offset="100%" stopColor="#10b981" stopOpacity="0"/>
+                </linearGradient>
+              </defs>
+              <path
+                d={`M 0,100 L 0,95 L 40,95 L 80,80 L 120,90 L 160,95 L 200,95 L 240,80 L 280,95 L 320,100 Z`}
+                fill="url(#gradient-emerald)"
+              />
+              <path
+                d={`M 0,95 L 40,95 L 80,80 L 120,90 L 160,95 L 200,95 L 240,80 L 280,95`}
+                fill="none"
+                stroke="#10b981"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+            </svg>
           </div>
         </div>
       </div>
-
+ 
       {/* Two Column details: My Device & Online list */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -142,11 +197,11 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400 font-medium">Système :</span>
-                  <span className="font-bold text-slate-700">Windows</span>
+                  <span className="font-bold text-slate-700">{getOS()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400 font-medium">IP Locale :</span>
-                  <span className="font-bold text-slate-700 font-mono">192.168.1.34</span>
+                  <span className="font-bold text-slate-700 font-mono">{getLocalIPMock()}</span>
                 </div>
               </div>
             </div>
@@ -155,7 +210,7 @@ export default function DashboardPage() {
               Chargement des détails de session...
             </div>
           )}
-
+ 
           {/* Quick Shortcuts */}
           <div className="space-y-2">
             <Link 
@@ -178,7 +233,7 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
-
+ 
         {/* Right column: Devices Detected Grid (Takes 2 columns in large screens) */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-2 flex flex-col justify-between">
           <div>
@@ -197,9 +252,9 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-1">
-                {otherDevices.map((device, index) => (
+                {otherDevices.map((device) => (
                   <Link 
-                    key={index}
+                    key={device.user_id}
                     to={`/officelink/files?peerId=${device.user_id}`}
                     className="p-4 border border-slate-200 rounded-2xl bg-white hover:bg-blue-50/20 hover:border-blue-300 hover:shadow-md cursor-pointer transition-all flex items-center justify-between group"
                   >
@@ -226,7 +281,7 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-
+ 
           <div className="border-t border-slate-200/80 pt-4 mt-6 flex justify-between items-center text-xs text-slate-400 font-semibold">
             <span>Aucun scan manuel requis</span>
             <span>Détection instantanée</span>
