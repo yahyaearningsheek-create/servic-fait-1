@@ -448,7 +448,7 @@ function OfficeLinkLayoutContent({ session }: { session: Session }) {
 
   const navLinks = [
     { name: 'Dashboard', path: '/officelink', icon: Activity },
-    { name: 'Studio IA', path: '/officelink/studio-ia', icon: Palette },
+    { name: 'PDF Studio Pro', path: '/officelink/studio-ia', icon: Palette },
     { name: 'Chat (P2P)', path: '/officelink/chat', icon: MessageSquare, badge: unreadCount },
     { name: 'Fichiers LAN', path: '/officelink/files', icon: Files },
     { name: 'Administration', path: '/officelink/admin', icon: Settings },
