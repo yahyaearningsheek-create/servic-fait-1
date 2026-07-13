@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { ArrowLeft, Check, Type, Pen, Upload, X, Move, Download, Stamp } from "lucide-react";
+import { compositeSignatureToImage } from "../../utils/canvasComposite";
+import { imagesToPDF, downloadDataURL } from "../../utils/pdfExport";
 
 interface SignerPDFProps {
   pdfPages: string[];
@@ -24,7 +26,6 @@ const COLORS = [
 ];
 
 export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
-  // Google Fonts
   useEffect(() => {
     const link = document.createElement("link");
     link.href = "https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;700&family=Great+Vibes&family=Pacifico&family=Caveat:wght@400;700&display=swap";
@@ -41,18 +42,13 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
   const [selectedFont, setSelectedFont] = useState(0);
   const [selectedColor, setSelectedColor] = useState("#000000");
 
-  // Drawing canvas
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawData, setDrawData] = useState<string | null>(null);
 
-  // Import
   const [importedImage, setImportedImage] = useState<string | null>(null);
-
-  // Stamp
   const [stampImage, setStampImage] = useState<string | null>(null);
 
-  // Placement
   const [currentPage, setCurrentPage] = useState(0);
   const [sigPos, setSigPos] = useState({ x: 60, y: 75, w: 25, h: 8 });
   const [applyMode, setApplyMode] = useState<"current" | "all" | "range">("current");
@@ -63,8 +59,8 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const pageRef = useRef<HTMLDivElement>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Initials drawing
   const initCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isInitDrawing, setIsInitDrawing] = useState(false);
   const [initDrawData, setInitDrawData] = useState<string | null>(null);
@@ -76,7 +72,7 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
     if (activeTab === "initiales") {
       if (initSigMode === "draw") return initDrawData;
       if (initSigMode === "import") return initImported;
-      return null; // type mode renders text directly
+      return null;
     }
     if (sigMode === "draw") return drawData;
     if (sigMode === "import") return importedImage;
@@ -95,7 +91,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
     return "";
   };
 
-  // Canvas drawing
   const startDraw = (e: React.MouseEvent, ref: React.RefObject<HTMLCanvasElement | null>) => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -145,7 +140,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
     reader.readAsDataURL(file);
   };
 
-  // Placement drag
   const handlePlaceDragStart = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -206,17 +200,54 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
     return false;
   };
 
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const preview = getSignaturePreview();
+      const sigImage = isTextMode() ? null : preview;
+      const sigText = isTextMode() ? getTextContent() : null;
+
+      const pagesToSign = applyMode === "all"
+        ? pdfPages.map((_, i) => i)
+        : applyMode === "range"
+          ? pdfPages.map((_, i) => i).filter(i => i + 1 >= rangeFrom && i + 1 <= rangeTo)
+          : [currentPage];
+
+      const composited: string[] = [];
+
+      for (let i = 0; i < pdfPages.length; i++) {
+        if (pagesToSign.includes(i)) {
+          const img = new Image();
+          img.src = pdfPages[i];
+          await new Promise<void>(res => { img.onload = () => res(); });
+          const result = await compositeSignatureToImage(
+            pdfPages[i], sigImage, sigText,
+            FONTS[selectedFont].css, selectedColor,
+            sigPos, img.naturalWidth, img.naturalHeight
+          );
+          composited.push(result);
+        } else {
+          composited.push(pdfPages[i]);
+        }
+      }
+
+      await imagesToPDF(composited, "document_signe.pdf");
+    } catch (err) {
+      console.error("Save error:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const tabs: { key: TabType; label: string; icon: React.ReactNode }[] = [
     { key: "signature", label: "Signature", icon: <Pen className="w-4 h-4" /> },
     { key: "initiales", label: "Initiales", icon: <Type className="w-4 h-4" /> },
     { key: "tampon", label: "Tampon d'entreprise", icon: <Stamp className="w-4 h-4" /> },
   ];
 
-  // CONFIG STEP
   if (step === "config") {
     return (
       <div className="h-full flex flex-col bg-slate-950 text-white">
-        {/* Header */}
         <div className="h-14 flex items-center gap-3 px-5 border-b border-slate-800 shrink-0">
           <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
           <h2 className="text-sm font-bold">Configurer votre signature</h2>
@@ -224,7 +255,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
 
         <div className="flex-1 overflow-auto p-6 flex justify-center">
           <div className="w-full max-w-2xl space-y-6">
-            {/* Name & Initials */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Nom Complet</label>
@@ -236,7 +266,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               </div>
             </div>
 
-            {/* Tabs */}
             <div className="flex gap-1 bg-slate-900 rounded-xl p-1">
               {tabs.map(t => (
                 <button key={t.key} onClick={() => setActiveTab(t.key)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === t.key ? "bg-teal-600 text-white shadow-lg" : "text-slate-400 hover:text-white hover:bg-slate-800"}`}>
@@ -245,7 +274,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               ))}
             </div>
 
-            {/* Signature Tab */}
             {activeTab === "signature" && (
               <div className="space-y-4">
                 <div className="flex gap-1 bg-slate-900/50 rounded-lg p-1">
@@ -299,7 +327,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
                   </div>
                 )}
 
-                {/* Color Palette */}
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Couleur :</span>
                   <div className="flex gap-2">
@@ -311,7 +338,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               </div>
             )}
 
-            {/* Initiales Tab */}
             {activeTab === "initiales" && (
               <div className="space-y-4">
                 <div className="flex gap-1 bg-slate-900/50 rounded-lg p-1">
@@ -366,7 +392,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               </div>
             )}
 
-            {/* Tampon Tab */}
             {activeTab === "tampon" && (
               <div className="space-y-4">
                 {stampImage ? (
@@ -391,7 +416,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               </div>
             )}
 
-            {/* Apply Button */}
             <button onClick={() => { if (canProceed()) { setRangeTo(pdfPages.length); setStep("place"); } }}
               disabled={!canProceed()}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-sm shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2">
@@ -403,7 +427,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
     );
   }
 
-  // PLACEMENT STEP
   const preview = getSignaturePreview();
   return (
     <div className="h-full flex flex-col bg-slate-950 text-white">
@@ -426,8 +449,8 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               <input type="number" min={1} max={pdfPages.length} value={rangeTo} onChange={e => setRangeTo(+e.target.value)} className="w-12 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white" />
             </div>
           )}
-          <button className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-lg">
-            <Download className="w-3.5 h-3.5" /><span>Enregistrer</span>
+          <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-lg">
+            <Download className="w-3.5 h-3.5" /><span>{isSaving ? "Enregistrement..." : "Enregistrer"}</span>
           </button>
         </div>
       </div>
@@ -435,7 +458,6 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
       <div className="flex-1 flex items-center justify-center p-8 overflow-auto bg-slate-900/50">
         <div ref={pageRef} className="relative shadow-2xl rounded-lg overflow-hidden" style={{ maxHeight: "80vh" }}>
           {pdfPages[currentPage] && <img src={pdfPages[currentPage]} alt={`Page ${currentPage + 1}`} className="max-h-[75vh] w-auto" draggable={false} />}
-          {/* Signature overlay */}
           <div className="absolute cursor-move select-none" style={{ left: `${sigPos.x}%`, top: `${sigPos.y}%`, width: `${sigPos.w}%`, height: `${sigPos.h}%`, border: "2px dashed rgba(20,184,166,0.7)", background: "rgba(20,184,166,0.05)" }}
             onMouseDown={handlePlaceDragStart}>
             <div className="w-full h-full flex items-center justify-center overflow-hidden">
@@ -446,13 +468,11 @@ export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
               ) : null}
             </div>
             <Move className="absolute top-0.5 left-0.5 w-3 h-3 text-teal-400 opacity-70" />
-            {/* Resize handle */}
             <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-teal-500 rounded-full cursor-nwse-resize border-2 border-white shadow" onMouseDown={handlePlaceResizeStart} />
           </div>
         </div>
       </div>
 
-      {/* Page navigation */}
       {pdfPages.length > 1 && (
         <div className="h-12 flex items-center justify-center gap-4 border-t border-slate-800 shrink-0">
           <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="px-3 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors">← Précédente</button>

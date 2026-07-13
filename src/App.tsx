@@ -276,7 +276,7 @@ export default function App({ embedded = false }: AppProps) {
   };
 
   // Handlers
-  const handleSaveIntervention = async (newInt: Omit<Intervention, "id" | "refNumber" | "created_at">) => {
+  const handleSaveIntervention = async (newInt: Omit<Intervention, "id" | "refNumber" | "created_at">, batchIndex?: number, totalInBatch?: number) => {
     const id = `int-${Date.now()}`;
     const refNumber = `REF-${Math.floor(Math.random() * 10000).toString().padStart(4, "0")}`;
     const created_at = new Date().toISOString();
@@ -304,9 +304,14 @@ export default function App({ embedded = false }: AppProps) {
       if (cleaned) {
         showToastNotification("Quota atteint : Sauvegarde PDF locale effectuée et purge Supabase réussie.");
         fetchInterventions().then(setInterventions);
+      } else if (totalInBatch && totalInBatch > 1 && batchIndex !== undefined) {
+        if (batchIndex === totalInBatch - 1) {
+          showToastNotification(`${totalInBatch} interventions du lot enregistrées avec succès !`);
+          setActiveTab("registry");
+        }
       } else {
-        // If not cleaned, we just show a normal success
         showToastNotification("Intervention consignée avec succès dans Supabase !");
+        setActiveTab("registry");
       }
 
       // Auto Backup Local JSON
@@ -334,8 +339,11 @@ export default function App({ embedded = false }: AppProps) {
     } catch (e) {
       console.error("Auto PDF generation failed:", e);
     }
-    
-    setActiveTab("registry");
+
+    // For single saves, navigate immediately. For batch saves, navigation is handled above.
+    if (!totalInBatch || totalInBatch <= 1) {
+      setActiveTab("registry");
+    }
   };
 
   const handleDeleteIntervention = async (id: string) => {

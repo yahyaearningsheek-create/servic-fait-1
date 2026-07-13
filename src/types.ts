@@ -30,6 +30,7 @@ export interface Intervention {
   durationMinutes: number; // Durée de l'intervention
   quickNotes?: string; // Notes rapides optionnelles (détails contextuels / observations)
   photos?: DevicePhoto[]; // Photos d'intervention avec descriptions
+  batchId?: string; // Grouping ID for multi-beneficiary batch saves (links related interventions)
   created_at: string;
 }
 

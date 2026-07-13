@@ -14,6 +14,8 @@ import SignerPDF from "../components/pdf/SignerPDF";
 import ModifierPDF from "../components/pdf/ModifierPDF";
 import OrganiserPDF from "../components/pdf/OrganiserPDF";
 import NumerosPDF from "../components/pdf/NumerosPDF";
+import ConvertPDF from "../components/pdf/ConvertPDF";
+import { renderPDFToImages } from "../utils/pdfRenderer";
 
 interface Layer {
   id: string;
@@ -68,7 +70,7 @@ export default function StudioIAPage() {
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   
   // PDF Studio Tool State
-  const [activePdfTool, setActivePdfTool] = useState<"dashboard" | "signer" | "modifier" | "organiser" | "numeros" | "calques">("dashboard");
+  const [activePdfTool, setActivePdfTool] = useState<"dashboard" | "signer" | "modifier" | "organiser" | "numeros" | "calques" | "convert">("dashboard");
   const [pdfPages, setPdfPages] = useState<string[]>([]);
   
   // Natural Command state
@@ -1208,31 +1210,39 @@ export default function StudioIAPage() {
     info: "#3b82f6",
   };
 
-  // PDF file upload handler
-  const handlePdfFileUpload = (e: React.ChangeEvent<HTMLInputElement>, tool: "signer" | "modifier" | "organiser" | "numeros") => {
+  // PDF file upload handler — supports both images and actual PDF files
+  const handlePdfFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, tool: "signer" | "modifier" | "organiser" | "numeros") => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const fileArray = Array.from(files) as File[];
     const newPages: string[] = [];
-    let loaded = 0;
-    fileArray.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        newPages.push(ev.target?.result as string);
-        loaded++;
-        if (loaded === fileArray.length) {
-          setPdfPages(prev => [...prev, ...newPages]);
-          setActivePdfTool(tool);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+
+    for (const file of fileArray) {
+      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+        const images = await renderPDFToImages(file, 2);
+        newPages.push(...images);
+      } else {
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+        newPages.push(dataUrl);
+      }
+    }
+
+    setPdfPages(prev => [...prev, ...newPages]);
+    setActivePdfTool(tool);
   };
 
   const pdfFileInputRef = useRef<HTMLInputElement>(null);
   const [pendingTool, setPendingTool] = useState<"signer" | "modifier" | "organiser" | "numeros" | null>(null);
 
-  const openPdfTool = (tool: "signer" | "modifier" | "organiser" | "numeros") => {
+  const openPdfTool = (tool: "signer" | "modifier" | "organiser" | "numeros" | "convert") => {
+    if (tool === "convert") {
+      setActivePdfTool("convert");
+      return;
+    }
     if (pdfPages.length > 0) {
       setActivePdfTool(tool);
     } else {
@@ -1254,6 +1264,9 @@ export default function StudioIAPage() {
   if (activePdfTool === "numeros" && pdfPages.length > 0) {
     return <NumerosPDF pdfPages={pdfPages} onBack={() => setActivePdfTool("dashboard")} />;
   }
+  if (activePdfTool === "convert") {
+    return <ConvertPDF onBack={() => setActivePdfTool("dashboard")} />;
+  }
 
   // Dashboard view
   if (activePdfTool === "dashboard") {
@@ -1262,6 +1275,7 @@ export default function StudioIAPage() {
       { key: "signer" as const, label: "Signer PDF", desc: "Signature, initiales, tampon d'entreprise", icon: <Pen className="w-8 h-8" />, gradient: "from-emerald-600 to-teal-600", shadow: "shadow-emerald-500/25" },
       { key: "organiser" as const, label: "Organiser PDF", desc: "Réordonner, supprimer, insérer des pages", icon: <FolderOpen className="w-8 h-8" />, gradient: "from-orange-600 to-amber-600", shadow: "shadow-orange-500/25" },
       { key: "numeros" as const, label: "Numéros de page", desc: "Ajouter une numérotation professionnelle", icon: <Hash className="w-8 h-8" />, gradient: "from-purple-600 to-violet-600", shadow: "shadow-purple-500/25" },
+      { key: "convert" as const, label: "Convertisseur", desc: "PDF→Image, PDF→Word, Word→PDF, Fusionner, Extraire", icon: <Download className="w-8 h-8" />, gradient: "from-rose-600 to-pink-600", shadow: "shadow-rose-500/25" },
     ];
 
     return (
@@ -1270,7 +1284,7 @@ export default function StudioIAPage() {
         <input
           ref={pdfFileInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,.pdf"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -1356,22 +1370,26 @@ export default function StudioIAPage() {
               <Upload className="w-10 h-10 text-slate-600 group-hover:text-teal-500 transition-colors" />
               <div className="text-center">
                 <p className="text-sm font-bold text-slate-400 group-hover:text-slate-300 transition-colors">Glissez vos pages ici ou cliquez pour importer</p>
-                <p className="text-[10px] text-slate-600 mt-1">Formats acceptés : PNG, JPG, WEBP (images de pages de document)</p>
+                <p className="text-[10px] text-slate-600 mt-1">Formats acceptés : PDF, PNG, JPG, WEBP</p>
               </div>
-              <input type="file" accept="image/*" multiple className="hidden" onChange={e => {
+              <input type="file" accept="image/*,.pdf" multiple className="hidden" onChange={async e => {
                 if (e.target.files && e.target.files.length > 0) {
                   const files = Array.from(e.target.files) as File[];
                   const pages: string[] = [];
-                  let loaded = 0;
-                  files.forEach(f => {
-                    const r = new FileReader();
-                    r.onload = ev => {
-                      pages.push(ev.target?.result as string);
-                      loaded++;
-                      if (loaded === files.length) setPdfPages(prev => [...prev, ...pages]);
-                    };
-                    r.readAsDataURL(f);
-                  });
+                  for (const f of files) {
+                    if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
+                      const images = await renderPDFToImages(f, 2);
+                      pages.push(...images);
+                    } else {
+                      const dataUrl = await new Promise<string>((resolve) => {
+                        const r = new FileReader();
+                        r.onload = ev => resolve(ev.target?.result as string);
+                        r.readAsDataURL(f);
+                      });
+                      pages.push(dataUrl);
+                    }
+                  }
+                  setPdfPages(prev => [...prev, ...pages]);
                 }
                 e.target.value = "";
               }} />

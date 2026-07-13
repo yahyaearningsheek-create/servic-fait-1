@@ -1,5 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Highlighter, Underline, Strikethrough, Pencil, Eraser, StickyNote, Square, Circle, Minus, ArrowUpRight, Type, Stamp, Plus, Trash2, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Bold, Italic, AlignLeft, AlignCenter, AlignRight, X, Palette, Move } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { ArrowLeft, Highlighter, Underline, Strikethrough, Pencil, Eraser, StickyNote, Square, Circle, Minus, ArrowUpRight, Type, Stamp, Plus, Trash2, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Bold, Italic, AlignLeft, AlignCenter, AlignRight, X, Palette, Move, Download } from "lucide-react";
+import { compositeAnnotationsToImage } from "../../utils/canvasComposite";
+import { imagesToPDF, downloadDataURL } from "../../utils/pdfExport";
 
 interface ModifierPDFProps {
   pdfPages: string[];
@@ -25,6 +27,10 @@ const STAMPS = [
   { text: "COPIE", color: "#2563eb", bg: "#dbeafe" },
   { text: "ORIGINAL", color: "#7c3aed", bg: "#ede9fe" },
   { text: "ANNULÉ", color: "#dc2626", bg: "#fef2f2" },
+  { text: "VU POUR APPROBATION", color: "#2563eb", bg: "#dbeafe" },
+  { text: "PAIEMENT EFFECTUÉ", color: "#16a34a", bg: "#dcfce7" },
+  { text: "EN ATTENTE", color: "#f59e0b", bg: "#fef3c7" },
+  { text: "ARCHIVÉ", color: "#6b7280", bg: "#f3f4f6" },
 ];
 
 export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
@@ -38,15 +44,15 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
   const [drawColor, setDrawColor] = useState("#facc15");
   const [strokeWidth, setStrokeWidth] = useState(3);
   const [drawOpacity, setDrawOpacity] = useState(0.4);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveFormat, setSaveFormat] = useState<"pdf" | "png">("pdf");
 
-  // Drawing state
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
   const [pencilPoints, setPencilPoints] = useState<{ x: number; y: number }[]>([]);
 
-  // Text editing
   const [textFontSize, setTextFontSize] = useState(16);
   const [textFontFamily, setTextFontFamily] = useState("Arial");
   const [textBold, setTextBold] = useState(false);
@@ -54,12 +60,10 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
   const [textAlign, setTextAlign] = useState("left");
   const [editingNote, setEditingNote] = useState<string | null>(null);
 
-  // Custom stamp
   const [showCustomStamp, setShowCustomStamp] = useState(false);
   const [customStampText, setCustomStampText] = useState("");
   const [customStampColor, setCustomStampColor] = useState("#dc2626");
 
-  // Drag annotation
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
@@ -180,7 +184,6 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
     }
   };
 
-  // Annotation dragging
   const handleAnnMouseDown = (e: React.MouseEvent, ann: Annotation) => {
     e.stopPropagation();
     setSelectedId(ann.id);
@@ -204,6 +207,34 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
     window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, [draggingId, dragOffset]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const composited: string[] = [];
+      for (let i = 0; i < pdfPages.length; i++) {
+        const pageAnns = annotations.filter(a => a.page === i);
+        const img = new Image();
+        img.src = pdfPages[i];
+        await new Promise<void>((res) => { img.onload = () => res(); });
+        const result = await compositeAnnotationsToImage(
+          pdfPages[i], pageAnns, img.naturalWidth, img.naturalHeight
+        );
+        composited.push(result);
+      }
+      if (saveFormat === "pdf") {
+        await imagesToPDF(composited, "document_modifie.pdf");
+      } else {
+        composited.forEach((img, i) => {
+          downloadDataURL(img, `page_${i + 1}.png`);
+        });
+      }
+    } catch (err) {
+      console.error("Save error:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const selectedAnn = annotations.find(a => a.id === selectedId);
 
@@ -253,7 +284,7 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
       case "note":
         return (
           <div key={ann.id} style={{ ...commonStyle, background: "#fef9c3", borderRadius: 8, boxShadow: "0 2px 8px rgba(0,0,0,0.15)", border: isSelected ? "2px solid #14b8a6" : "1px solid #fde68a", padding: 8, display: "flex", flexDirection: "column" }} onMouseDown={e => handleAnnMouseDown(e, ann)} onDoubleClick={() => setEditingNote(ann.id)}>
-            <div className="text-[9px] font-bold text-amber-700 mb-1 select-none">📝 Note</div>
+            <div className="text-[9px] font-bold text-amber-700 mb-1 select-none">Note</div>
             {editingNote === ann.id ? (
               <textarea autoFocus value={ann.text || ""} onChange={e => updateAnnotation(ann.id, { text: e.target.value })} onBlur={() => setEditingNote(null)} className="flex-1 bg-transparent border-none outline-none text-xs text-gray-800 resize-none" onClick={e => e.stopPropagation()} />
             ) : (
@@ -302,7 +333,6 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
 
   return (
     <div className="h-full flex flex-col bg-slate-950 text-white">
-      {/* Top Toolbar */}
       <div className="shrink-0 border-b border-slate-800">
         <div className="h-12 flex items-center gap-3 px-4">
           <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
@@ -320,9 +350,17 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
             <span className="text-[10px] text-slate-500 w-10 text-center">{zoom}%</span>
             <button onClick={() => setZoom(Math.min(200, zoom + 10))} className="p-1.5 rounded hover:bg-slate-800 cursor-pointer"><ZoomIn className="w-4 h-4 text-slate-400" /></button>
           </div>
+          <div className="flex items-center gap-2 ml-3 border-l border-slate-700 pl-3">
+            <select value={saveFormat} onChange={e => setSaveFormat(e.target.value as "pdf" | "png")} className="text-[10px] bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white cursor-pointer">
+              <option value="pdf">PDF</option>
+              <option value="png">PNG</option>
+            </select>
+            <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-xs font-bold cursor-pointer transition-colors shadow-lg">
+              <Download className="w-3.5 h-3.5" /><span>{isSaving ? "Enregistrement..." : "Enregistrer"}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Sub-toolbar */}
         <div className="h-10 flex items-center gap-1 px-4 bg-slate-900/50 border-t border-slate-800/50">
           {toolGroup === "annoter" && ANNOT_TOOLS.map(t => (
             <button key={t.key} onClick={() => setAnnotTool(t.key)} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${annotTool === t.key ? "bg-slate-700 text-teal-400" : "text-slate-500 hover:text-slate-300"}`}>
@@ -359,14 +397,11 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Main canvas area */}
         <div className="flex-1 overflow-auto flex items-start justify-center p-6 bg-slate-900/30">
           <div className="relative shadow-2xl" style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top center" }}>
             {pdfPages[currentPage] && <img src={pdfPages[currentPage]} alt={`Page ${currentPage + 1}`} className="block max-w-none" draggable={false} />}
-            {/* Annotation overlay */}
             <div ref={overlayRef} className="absolute inset-0" style={{ cursor: toolGroup === "texte" ? "text" : "crosshair" }}
               onMouseDown={handleOverlayMouseDown} onMouseMove={handleOverlayMouseMove} onMouseUp={handleOverlayMouseUp}>
-              {/* Live pencil preview */}
               {isDrawing && pencilPoints.length > 1 && (
                 <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: "visible" }}>
                   <polyline points={pencilPoints.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke={drawColor} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
@@ -377,7 +412,6 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
           </div>
         </div>
 
-        {/* Stamps sidebar */}
         {toolGroup === "timbres" && (
           <div className="w-64 border-l border-slate-800 bg-slate-950 overflow-auto p-4 space-y-3 shrink-0">
             <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Timbres Standards</p>
@@ -409,7 +443,6 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
           </div>
         )}
 
-        {/* Properties panel when something is selected */}
         {selectedAnn && toolGroup !== "timbres" && (
           <div className="w-56 border-l border-slate-800 bg-slate-950 p-4 space-y-4 shrink-0">
             <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Propriétés</p>
@@ -438,7 +471,6 @@ export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
         )}
       </div>
 
-      {/* Page navigation */}
       <div className="h-12 flex items-center justify-center gap-4 border-t border-slate-800 shrink-0 bg-slate-950">
         <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
         <span className="text-xs text-slate-400">Page {currentPage + 1} / {pdfPages.length}</span>

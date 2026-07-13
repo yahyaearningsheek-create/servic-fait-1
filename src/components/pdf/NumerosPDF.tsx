@@ -1,5 +1,7 @@
 import React, { useState } from "react";
-import { ArrowLeft, Hash, ChevronLeft, ChevronRight, Bold, Italic, RotateCcw, Check } from "lucide-react";
+import { ArrowLeft, Hash, ChevronLeft, ChevronRight, Bold, Italic, RotateCcw, Check, Download } from "lucide-react";
+import { compositePageNumberToImage } from "../../utils/canvasComposite";
+import { imagesToPDF } from "../../utils/pdfExport";
 
 interface NumerosPDFProps {
   pdfPages: string[];
@@ -53,6 +55,7 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
   const [skipFirst, setSkipFirst] = useState(false);
   const [margin, setMargin] = useState(30);
   const [currentPage, setCurrentPage] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
 
   const total = pdfPages.length;
 
@@ -98,9 +101,36 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
     setMargin(30);
   };
 
+  const handleApply = async () => {
+    setIsSaving(true);
+    try {
+      const composited: string[] = [];
+      for (let i = 0; i < pdfPages.length; i++) {
+        const pageNumText = getPageNumber(i);
+        if (pageNumText) {
+          const img = new Image();
+          img.src = pdfPages[i];
+          await new Promise<void>(res => { img.onload = () => res(); });
+          const result = await compositePageNumberToImage(
+            pdfPages[i], pageNumText, position,
+            { fontFamily, fontSize, bold, italic, color, margin },
+            img.naturalWidth, img.naturalHeight
+          );
+          composited.push(result);
+        } else {
+          composited.push(pdfPages[i]);
+        }
+      }
+      await imagesToPDF(composited, "document_numerote.pdf");
+    } catch (err) {
+      console.error("Apply numbering error:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-slate-950 text-white">
-      {/* Header */}
       <div className="h-14 flex items-center gap-3 px-5 border-b border-slate-800 shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
         <Hash className="w-5 h-5 text-teal-500" />
@@ -108,9 +138,7 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Configuration Panel */}
         <div className="w-80 border-r border-slate-800 bg-slate-900/50 overflow-auto p-5 space-y-6 shrink-0">
-          {/* Format */}
           <div className="space-y-3">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Format de numérotation</p>
             <div className="space-y-1.5">
@@ -126,7 +154,6 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
             </div>
           </div>
 
-          {/* Position */}
           <div className="space-y-3">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Position sur la page</p>
             <div className="grid grid-cols-3 gap-1.5 w-32 mx-auto">
@@ -148,7 +175,6 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
             </div>
           </div>
 
-          {/* Style */}
           <div className="space-y-3">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Style</p>
             <div className="space-y-2.5">
@@ -181,7 +207,6 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
             </div>
           </div>
 
-          {/* Page Range */}
           <div className="space-y-3">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Plage de pages</p>
             <label className="flex items-center gap-2.5 cursor-pointer">
@@ -210,20 +235,17 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
             </label>
           </div>
 
-          {/* Margin */}
           <div className="space-y-3">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Marge : {margin}px</p>
             <input type="range" min={10} max={80} value={margin} onChange={e => setMargin(+e.target.value)} className="w-full accent-teal-500" />
           </div>
         </div>
 
-        {/* Preview Area */}
         <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-auto bg-slate-900/30">
           <div className="relative shadow-2xl rounded-lg overflow-hidden" style={{ maxHeight: "75vh" }}>
             {pdfPages[currentPage] && (
               <img src={pdfPages[currentPage]} alt={`Page ${currentPage + 1}`} className="max-h-[70vh] w-auto block" draggable={false} />
             )}
-            {/* Page number overlay */}
             {numberText && (
               <div
                 className="absolute pointer-events-none select-none"
@@ -254,7 +276,6 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
         </div>
       </div>
 
-      {/* Bottom bar */}
       <div className="h-14 flex items-center justify-between px-6 border-t border-slate-800 shrink-0">
         <div className="flex items-center gap-4">
           <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
@@ -265,8 +286,8 @@ export default function NumerosPDF({ pdfPages, onBack }: NumerosPDFProps) {
           <button onClick={handleReset} className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-700 text-xs font-bold text-slate-300 hover:bg-slate-800 cursor-pointer transition-colors">
             <RotateCcw className="w-3.5 h-3.5" /><span>Réinitialiser</span>
           </button>
-          <button className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 rounded-lg text-sm font-bold cursor-pointer transition-all shadow-lg">
-            <Check className="w-4 h-4" /><span>Appliquer la numérotation</span>
+          <button onClick={handleApply} disabled={isSaving} className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 disabled:opacity-50 rounded-lg text-sm font-bold cursor-pointer transition-all shadow-lg">
+            <Check className="w-4 h-4" /><span>{isSaving ? "Enregistrement..." : "Appliquer et télécharger"}</span>
           </button>
         </div>
       </div>
