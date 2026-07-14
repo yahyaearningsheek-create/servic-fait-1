@@ -8,7 +8,7 @@ import DashboardPage from './pages/DashboardPage.tsx';
 import ChatPage from './pages/ChatPage.tsx';
 import FilesPage from './pages/FilesPage.tsx';
 import AdminPage from './pages/AdminPage.tsx';
-import StudioIAPage from './pages/StudioIAPage.tsx';
+import PdfStudioPage from './pages/PdfStudioPage.tsx';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -18,6 +18,9 @@ createRoot(document.getElementById('root')!).render(
         {/* Page d'accueil publique : Signalement d'Urgence IT */}
         <Route path="/" element={<SignalementPage />} />
 
+        {/* PDF Studio — page standalone */}
+        <Route path="/pdf-studio" element={<PdfStudioPage />} />
+
         {/* Portail Collaboratif OfficeLink (Intranet LAN) */}
         <Route path="/officelink" element={<OfficeLinkLayout />}>
           <Route index element={<DashboardPage />} />
@@ -25,7 +28,6 @@ createRoot(document.getElementById('root')!).render(
           <Route path="chat" element={<ChatPage />} />
           <Route path="files" element={<FilesPage />} />
           <Route path="admin" element={<AdminPage />} />
-          <Route path="studio-ia" element={<StudioIAPage />} />
         </Route>
 
         {/* Redirections pour la compatibilité et les anciens favoris */}

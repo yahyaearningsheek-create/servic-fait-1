@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { Session } from '@supabase/supabase-js';
 
@@ -12,7 +12,6 @@ export interface P2PMessage {
   fileName?: string;
   fileSize?: number;
   fileType?: string;
-  status?: 'sent' | 'delivered' | 'read';
 }
 
 export interface FileTransfer {
@@ -43,14 +42,6 @@ export interface PeerMeta {
   ip_locale: string;
 }
 
-export interface ToastMessage {
-  id: string;
-  message: string;
-  type: 'info' | 'success' | 'warning' | 'error';
-  fileUrl?: string;
-  downloadName?: string;
-}
-
 export interface WebRTCContextType {
   messages: P2PMessage[];
   peers: string[];
@@ -69,12 +60,6 @@ export interface WebRTCContextType {
   isPeerConnected: (clientId: string) => boolean;
   downloadDirectoryHandle: any | null;
   selectDownloadDirectory: () => Promise<void>;
-  toasts: ToastMessage[];
-  showToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
-  dismissToast: (id: string) => void;
-  typingPeers: { [email: string]: boolean };
-  setMyTypingStatus: (isTyping: boolean) => void;
-  markMessagesAsRead: (senderEmail: string) => void;
 }
 
 const WebRTCContext = createContext<WebRTCContextType | null>(null);
@@ -137,15 +122,6 @@ export function getLocalIPMock(): string {
   return ip;
 }
 
-// Sanitize file name for Supabase Storage keys (no accents, spaces, or special chars)
-function sanitizeStorageKey(fileName: string): string {
-  return fileName
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove accents
-    .replace(/[^a-zA-Z0-9._-]/g, '_') // Replace special chars with underscore
-    .replace(/_+/g, '_') // Collapse multiple underscores
-    .replace(/^_|_$/g, ''); // Trim leading/trailing underscores
-}
-
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -160,78 +136,26 @@ const DEFAULT_SEGMENT_SIZE = 2 * 1024 * 1024; // 2MB default
 export function WebRTCProvider({ children, session }: { children: React.ReactNode; session: Session | null }) {
   const [messages, setMessages] = useState<P2PMessage[]>([]);
   const [connectedPeers, setConnectedPeers] = useState<string[]>([]);
-  const [rawOnlinePeers, setRawOnlinePeers] = useState<string[]>([]);
+  const [onlinePeers, setOnlinePeers] = useState<string[]>([]);
   const [peerMetadata, setPeerMetadata] = useState<{ [clientId: string]: PeerMeta }>({});
   const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<{ [clientId: string]: 'connecting' | 'connected' | 'failed' }>({});
   const [downloadDirectoryHandle, setDownloadDirectoryHandle] = useState<any | null>(null);
 
-  const onlinePeers = useMemo(() => {
-    const groups: { [groupKey: string]: string[] } = {};
-    rawOnlinePeers.forEach(peerId => {
-      const email = peerMetadata[peerId]?.email?.toLowerCase() || '';
-      const nomAppareil = peerMetadata[peerId]?.nom_appareil?.toLowerCase() || '';
-      const groupKey = `${email}|${nomAppareil}`;
-      
-      if (!email && !nomAppareil) {
-        groups[peerId] = [peerId];
+  const selectDownloadDirectory = async () => {
+    try {
+      if (!('showDirectoryPicker' in window)) {
+        alert("Votre navigateur ne supporte pas l'enregistrement direct dans un dossier (API File System). Le téléchargement se fera dans le dossier par défaut de votre navigateur.");
         return;
       }
-      
-      if (!groups[groupKey]) {
-        groups[groupKey] = [];
-      }
-      groups[groupKey].push(peerId);
-    });
-
-    const uniquePeers: string[] = [];
-
-    Object.keys(groups).forEach(groupKey => {
-      const peerIds = groups[groupKey];
-      if (peerIds.length === 1) {
-        uniquePeers.push(peerIds[0]);
-        return;
-      }
-
-      // If multiple client sessions for same device/user exist:
-      // 1. Pick the one that is currently connected
-      const connectedId = peerIds.find(id => connectedPeers.includes(id));
-      if (connectedId) {
-        uniquePeers.push(connectedId);
-        return;
-      }
-
-      // 2. Pick the one that is currently connecting
-      const connectingId = peerIds.find(id => connectionStatus[id] === 'connecting');
-      if (connectingId) {
-        uniquePeers.push(connectingId);
-        return;
-      }
-
-      // 3. Otherwise, pick the first one
-      uniquePeers.push(peerIds[0]);
-    });
-
-    return uniquePeers;
-  }, [rawOnlinePeers, peerMetadata, connectedPeers, connectionStatus]);
-
-  // New state variables
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [typingPeers, setTypingPeers] = useState<{ [email: string]: boolean }>({});
-
-  const showToast = useCallback((message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info', fileUrl?: string, downloadName?: string) => {
-    const id = crypto.randomUUID();
-    setToasts(prev => [...prev, { id, message, type, fileUrl, downloadName }]);
-    // Auto-dismiss after 8s for file toasts, 5s for others
-    const timeout = fileUrl ? 15000 : 5000;
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, timeout);
-  }, []);
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
+      const handle = await (window as any).showDirectoryPicker({
+        mode: 'readwrite'
+      });
+      setDownloadDirectoryHandle(handle);
+    } catch (err) {
+      console.warn("Sélection de dossier annulée ou erreur", err);
+    }
+  };
 
   // === REFS for stable references (prevents useEffect dependency loops) ===
   const peerConnections = useRef<{ [clientId: string]: RTCPeerConnection }>({});
@@ -256,97 +180,11 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
   // Store current values in refs so callbacks always have fresh data
   const myIdRef = useRef(myId);
   const myEmailRef = useRef(myEmail);
-  const downloadDirectoryHandleRef = useRef(downloadDirectoryHandle);
-  const peerMetadataRef = useRef(peerMetadata);
 
   useEffect(() => {
     myIdRef.current = myId;
     myEmailRef.current = myEmail;
   }, [myId, myEmail]);
-
-  useEffect(() => {
-    downloadDirectoryHandleRef.current = downloadDirectoryHandle;
-  }, [downloadDirectoryHandle]);
-
-  useEffect(() => {
-    peerMetadataRef.current = peerMetadata;
-  }, [peerMetadata]);
-
-  // Load messages from localStorage on email change
-  useEffect(() => {
-    if (!myEmail) return;
-    try {
-      const stored = localStorage.getItem(`officelink_messages_${myEmail}`);
-      if (stored) {
-        setMessages(JSON.parse(stored));
-      } else {
-        setMessages([]);
-      }
-    } catch (e) {
-      console.error("Failed to load messages", e);
-    }
-  }, [myEmail]);
-
-  const setAndPersistMessages = useCallback((newMessages: P2PMessage[] | ((prev: P2PMessage[]) => P2PMessage[])) => {
-    setMessages(prev => {
-      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
-      if (myEmailRef.current) {
-        localStorage.setItem(`officelink_messages_${myEmailRef.current}`, JSON.stringify(updated));
-      }
-      return updated;
-    });
-  }, []);
-
-  const selectDownloadDirectory = async () => {
-    try {
-      if (!('showDirectoryPicker' in window)) {
-        showToast("Votre navigateur ne supporte pas l'enregistrement direct dans un dossier (API File System). Le téléchargement se fera dans le dossier par défaut de votre navigateur.", "error");
-        return;
-      }
-      const handle = await (window as any).showDirectoryPicker({
-        mode: 'readwrite'
-      });
-      setDownloadDirectoryHandle(handle);
-      showToast("Dossier de téléchargement configuré avec succès !", "success");
-    } catch (err) {
-      console.warn("Sélection de dossier annulée ou erreur", err);
-    }
-  };
-
-  const setMyTypingStatus = useCallback((isTyping: boolean) => {
-    if (!myEmailRef.current) return;
-    const channels = Object.values(dataChannels.current) as RTCDataChannel[];
-    channels.forEach(dc => {
-      if (dc.readyState === 'open') {
-        try {
-          dc.send(JSON.stringify({
-            type: 'typing',
-            payload: { email: myEmailRef.current, isTyping }
-          }));
-        } catch {}
-      }
-    });
-  }, []);
-
-  const markMessagesAsRead = useCallback((senderEmail: string) => {
-    setAndPersistMessages(prev => 
-      prev.map(m => m.senderEmail === senderEmail && m.status !== 'read' ? { ...m, status: 'read' } : m)
-    );
-
-    const channels = Object.values(dataChannels.current) as RTCDataChannel[];
-    channels.forEach(dc => {
-      if (dc.readyState === 'open') {
-        try {
-          dc.send(JSON.stringify({
-            type: 'msg-read-all',
-            payload: { readerEmail: myEmailRef.current, senderEmail }
-          }));
-        } catch (e) {
-          console.error("Error sending read-all ack:", e);
-        }
-      }
-    });
-  }, [setAndPersistMessages]);
 
   const syncTransferList = useCallback(() => {
     setActiveTransfers(Object.values(activeTransfersRef.current));
@@ -359,85 +197,11 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
     return 2 * MB; // 2MB default
   };
 
-  const calculateSHA256 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const workerCode = `
-        self.onmessage = async (e) => {
-          try {
-            const { file } = e.data;
-            const arrayBuffer = await file.arrayBuffer();
-            const hashBuffer = await self.crypto.subtle.digest('SHA-256', arrayBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            self.postMessage({ success: true, hash: hashHex });
-          } catch (err) {
-            self.postMessage({ success: false, error: err.message || err.toString() });
-          }
-        };
-      `;
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(workerUrl);
-
-      worker.onmessage = (e) => {
-        const { success, hash, error } = e.data;
-        if (success) {
-          resolve(hash);
-        } else {
-          reject(new Error(error));
-        }
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-      };
-
-      worker.onerror = (err) => {
-        reject(err);
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-      };
-
-      worker.postMessage({ file });
-    });
-  };
-
-  const calculateSHA256ForBuffer = (buffer: ArrayBuffer): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const workerCode = `
-        self.onmessage = async (e) => {
-          try {
-            const { buffer } = e.data;
-            const hashBuffer = await self.crypto.subtle.digest('SHA-256', buffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            self.postMessage({ success: true, hash: hashHex, buffer }, [buffer]);
-          } catch (err) {
-            self.postMessage({ success: false, error: err.message || err.toString() });
-          }
-        };
-      `;
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      const worker = new Worker(workerUrl);
-
-      worker.onmessage = (e) => {
-        const { success, hash, error } = e.data;
-        if (success) {
-          resolve(hash);
-        } else {
-          reject(new Error(error));
-        }
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-      };
-
-      worker.onerror = (err) => {
-        reject(err);
-        worker.terminate();
-        URL.revokeObjectURL(workerUrl);
-      };
-
-      worker.postMessage({ buffer }, [buffer]);
-    });
+  const calculateSHA256 = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
   // Queue orchestrator
@@ -496,15 +260,9 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
     }
 
     // Calculate SHA-256
-    let calculatedHash = '';
-    try {
-      calculatedHash = await calculateSHA256ForBuffer(combined.buffer);
-    } catch (err) {
-      console.error("Worker hashing failed, falling back to main thread:", err);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      calculatedHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
+    const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const calculatedHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
     if (calculatedHash === transfer.sha256) {
       const blob = new Blob(allChunks, { type: transfer.fileType });
@@ -520,29 +278,32 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       syncTransferList();
       delete receivedChunks.current[transferId];
 
-      // Auto download direct to folder if selected (File System Access API)
-      if (downloadDirectoryHandleRef.current && transfer.isIncoming) {
+      // Auto download direct to folder if selected, otherwise fallback to standard download
+      if (downloadDirectoryHandle && transfer.isIncoming) {
         try {
-          const newFileHandle = await downloadDirectoryHandleRef.current.getFileHandle(transfer.fileName, { create: true });
+          const newFileHandle = await downloadDirectoryHandle.getFileHandle(transfer.fileName, { create: true });
           const writable = await newFileHandle.createWritable();
           await writable.write(blob);
           await writable.close();
           console.log("Fichier enregistré directement dans le dossier :", transfer.fileName);
-          showToast(`✅ Fichier "${transfer.fileName}" enregistré dans votre dossier.`, "success");
         } catch (err) {
-          console.error("Erreur d'écriture dans le dossier choisi.", err);
-          // Fallback: show toast with download button
-          showToast(`📁 Fichier "${transfer.fileName}" prêt à télécharger.`, "success", url, transfer.fileName);
+          console.error("Erreur d'écriture dans le dossier choisi. Utilisation du téléchargement classique.", err);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = transfer.fileName;
+          a.click();
         }
       } else if (transfer.isIncoming) {
-        // Show toast with download button (mobile-safe: requires user gesture)
-        showToast(`📁 Fichier "${transfer.fileName}" prêt à télécharger.`, "success", url, transfer.fileName);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = transfer.fileName;
+        a.click();
       }
 
       // Log activity
       const duration = ((Date.now() - (transfer.startTime || Date.now())) / 1000).toFixed(1);
       const myIP = getLocalIPMock();
-      const peerIP = peerMetadataRef.current[transfer.peerId]?.ip_locale || 'Inconnue';
+      const peerIP = peerMetadata[transfer.peerId]?.ip_locale || 'Inconnue';
       try {
         await supabase.from('activity_logs').insert({
           user_id: myIdRef.current,
@@ -559,7 +320,7 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       };
       syncTransferList();
       delete receivedChunks.current[transferId];
-      showToast(`Erreur de validation de signature pour le fichier ${transfer.fileName}. Le fichier reçu est corrompu.`, "error");
+      alert(`Erreur de validation de signature pour le fichier ${transfer.fileName}. Le fichier reçu est corrompu.`);
       processQueue();
     }
   };
@@ -691,70 +452,11 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
 
       if (msg.type === 'chat-message') {
         const chatMsg: P2PMessage = msg.payload;
-        const isChatActive = window.location.pathname === '/officelink/chat';
-        const receivedMsg: P2PMessage = { 
-          ...chatMsg, 
-          status: isChatActive ? 'read' : 'delivered' 
-        };
-
-        setAndPersistMessages(prev => {
+        setMessages(prev => {
           if (prev.find(m => m.id === chatMsg.id)) return prev;
-          return [...prev, receivedMsg];
+          return [...prev, chatMsg];
         });
-
-        // Play sound if not active chat
-        if (!isChatActive) {
-          try {
-            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 note
-            gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.15);
-          } catch {}
-        }
-
-        // Send back delivery or read confirmation
-        const dc = dataChannels.current[peerId];
-        if (dc && dc.readyState === 'open') {
-          dc.send(JSON.stringify({
-            type: isChatActive ? 'msg-read' : 'msg-delivered',
-            payload: { messageId: chatMsg.id, senderEmail: myEmailRef.current }
-          }));
-        }
       } 
-      
-      else if (msg.type === 'msg-delivered') {
-        const { messageId } = msg.payload;
-        setAndPersistMessages(prev => 
-          prev.map(m => m.id === messageId && m.status === 'sent' ? { ...m, status: 'delivered' } : m)
-        );
-      }
-
-      else if (msg.type === 'msg-read') {
-        const { messageId } = msg.payload;
-        setAndPersistMessages(prev => 
-          prev.map(m => m.id === messageId ? { ...m, status: 'read' } : m)
-        );
-      }
-
-      else if (msg.type === 'msg-read-all') {
-        const { readerEmail, senderEmail } = msg.payload;
-        if (senderEmail === myEmailRef.current) {
-          setAndPersistMessages(prev => 
-            prev.map(m => m.senderEmail === myEmailRef.current && m.status !== 'read' ? { ...m, status: 'read' } : m)
-          );
-        }
-      }
-
-      else if (msg.type === 'typing') {
-        const { email, isTyping } = msg.payload;
-        setTypingPeers(prev => ({ ...prev, [email]: isTyping }));
-      }
       
       else if (msg.type === 'file-metadata') {
         const { transferId, fileName, fileSize, fileType, senderEmail, priority, sha256 } = msg.payload;
@@ -1153,34 +855,6 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
     const os = getOS();
     const deviceName = `${myEmail.split('@')[0]}-${os}`;
 
-    const handleVisibilityAndOnlineChange = async () => {
-      if (document.visibilityState === 'visible' || navigator.onLine) {
-        console.log("[OfficeLink] Browser visibility/online state changed, ensuring presence active...");
-        try {
-          if (supabase.realtime && typeof supabase.realtime.connect === 'function') {
-            supabase.realtime.connect();
-          }
-          if (channel.state === 'closed' || channel.state === 'errored') {
-            channel.subscribe();
-          }
-          await channel.track({
-            user_id: myIdRef.current,
-            email: myEmailRef.current,
-            nom_appareil: deviceName,
-            systeme_exploitation: os,
-            ip_locale: localIP,
-            online_at: new Date().toISOString(),
-          });
-          console.log("[OfficeLink] Re-tracked presence successfully.");
-        } catch (e) {
-          console.warn("[OfficeLink] Re-tracking failed (temporary offline):", e);
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityAndOnlineChange);
-    window.addEventListener('online', handleVisibilityAndOnlineChange);
-
     channel
       .on('broadcast', { event: 'webrtc-signal' }, async ({ payload }) => {
         if (!payload || payload.target !== clientId) return;
@@ -1251,21 +925,11 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
         activeTransfersRef.current[transferId] = newTransfer;
         syncTransferList();
 
-        // Show toast with download button (mobile-safe: requires user gesture)
-        showToast(`📁 Fichier "${fileName}" de ${senderEmail} prêt à télécharger.`, "success", publicUrl, fileName);
-
-        // Browser notification for background tabs
-        try {
-          if ('Notification' in window && Notification.permission === 'granted') {
-            const n = new Notification('📁 Fichier reçu — OfficeLink', {
-              body: `${senderEmail} vous a envoyé "${fileName}" (${formatSize(fileSize)}).`,
-              icon: '/logo.jpeg',
-              tag: transferId,
-              requireInteraction: true
-            });
-            n.onclick = () => { window.focus(); n.close(); };
-          }
-        } catch (e) { /* Notifications not supported */ }
+        // Auto download
+        const a = document.createElement('a');
+        a.href = publicUrl;
+        a.download = fileName;
+        a.click();
 
         try {
           await supabase.from('activity_logs').insert({
@@ -1306,13 +970,13 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
           }
         }
 
-        setRawOnlinePeers(allPeerIds);
+        setOnlinePeers(allPeerIds);
         setPeerMetadata(prev => ({ ...prev, ...metadata }));
       })
       .on('presence', { event: 'leave' }, ({ key }) => {
         if (key) {
           knownPeers.current.delete(key);
-          setRawOnlinePeers(prev => prev.filter(p => p !== key));
+          setOnlinePeers(prev => prev.filter(p => p !== key));
           cleanupPeerFn(key);
         }
       })
@@ -1330,8 +994,6 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       });
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityAndOnlineChange);
-      window.removeEventListener('online', handleVisibilityAndOnlineChange);
       Object.keys(peerConnections.current).forEach(peerId => {
         cleanupPeerFn(peerId);
       });
@@ -1368,8 +1030,7 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       senderId: myIdRef.current,
       senderEmail: myEmailRef.current,
       text,
-      timestamp: new Date().toISOString(),
-      status: 'sent'
+      timestamp: new Date().toISOString()
     };
 
     const payload = { type: 'chat-message', payload: msg };
@@ -1383,65 +1044,8 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       }
     });
 
-    setAndPersistMessages(prev => [...prev, msg]);
-  }, [setAndPersistMessages]);
-
-  const cleanupOldCloudFiles = async (userId: string) => {
-    try {
-      const { data: logs, error } = await supabase
-        .from('activity_logs')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('action', 'ENVOI_FICHIER_CLOUD')
-        .order('date', { ascending: false });
-
-      if (error) {
-        console.error("Error fetching logs for cleanup:", error);
-        return;
-      }
-
-      if (logs && logs.length > 10) {
-        const logsToDelete = logs.slice(10);
-        const filePathsToDelete: string[] = [];
-        const logIdsToDelete: string[] = [];
-
-        logsToDelete.forEach(log => {
-          logIdsToDelete.push(log.id);
-          const pathMatch = log.description?.match(/\[Path: ([^\]]+)\]/);
-          if (pathMatch && pathMatch[1]) {
-            filePathsToDelete.push(pathMatch[1]);
-          }
-        });
-
-        if (filePathsToDelete.length > 0) {
-          const { error: storageErr } = await supabase.storage
-            .from('officelink-transfers')
-            .remove(filePathsToDelete);
-          
-          if (storageErr) {
-            console.error("Error deleting old files from storage:", storageErr);
-          } else {
-            console.log(`Deleted ${filePathsToDelete.length} old files from Supabase storage.`);
-          }
-        }
-
-        if (logIdsToDelete.length > 0) {
-          const { error: dbErr } = await supabase
-            .from('activity_logs')
-            .delete()
-            .in('id', logIdsToDelete);
-
-          if (dbErr) {
-            console.error("Error deleting old activity logs:", dbErr);
-          } else {
-            console.log(`Deleted ${logIdsToDelete.length} old activity logs.`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Error in cleanupOldCloudFiles:", err);
-    }
-  };
+    setMessages(prev => [...prev, msg]);
+  }, []);
 
   const uploadToCloudFallback = useCallback(async (transferId: string, targetPeerId: string, file: File, priority: 'high' | 'normal' | 'low') => {
     try {
@@ -1453,8 +1057,7 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       syncTransferList();
 
       const bucket = 'officelink-transfers';
-      const safeName = sanitizeStorageKey(file.name);
-      const filePath = `${transferId}/${safeName}`;
+      const filePath = `${transferId}/${file.name}`;
       
       const { data, error } = await supabase.storage
         .from(bucket)
@@ -1501,14 +1104,9 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
         await supabase.from('activity_logs').insert({
           user_id: myIdRef.current,
           action: 'ENVOI_FICHIER_CLOUD',
-          description: `Envoi Cloud Relais de "${file.name}" (${formatSize(file.size)}) réussi. [Path: ${filePath}] Source IP: ${myIP}, Durée: ${duration}s.`
+          description: `Envoi Cloud Relais de "${file.name}" (${formatSize(file.size)}) réussi. Source IP: ${myIP}, Durée: ${duration}s.`
         });
       } catch {}
-
-      // Asynchronously trigger automated cleanup of old files to preserve Supabase free tier space
-      if (myIdRef.current) {
-        cleanupOldCloudFiles(myIdRef.current);
-      }
 
       processQueue();
     } catch (err: any) {
@@ -1518,7 +1116,7 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
         status: 'failed'
       };
       syncTransferList();
-      showToast(`Échec du transfert Cloud Relais: ${err.message || err}`, "error");
+      alert(`Échec du transfert Cloud Relais: ${err.message || err}`);
       processQueue();
     }
   }, [syncTransferList, processQueue]);
@@ -1704,13 +1302,7 @@ export function WebRTCProvider({ children, session }: { children: React.ReactNod
       connectToPeer,
       isPeerConnected,
       downloadDirectoryHandle,
-      selectDownloadDirectory,
-      toasts,
-      showToast,
-      dismissToast,
-      typingPeers,
-      setMyTypingStatus,
-      markMessagesAsRead
+      selectDownloadDirectory
     }}>
       {children}
     </WebRTCContext.Provider>

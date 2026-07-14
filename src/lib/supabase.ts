@@ -4,20 +4,7 @@ import { Intervention, TechProfile } from '../types';
 const supabaseUrl = 'https://pzfcjxjydgopeloxlacg.supabase.co';
 const supabaseKey = 'sb_publishable_GWF5fDuA42RGLsNFCB63kg_S_B89gK7';
 
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storageKey: 'officelink-auth-token',
-    storage: window.localStorage,
-  },
-  realtime: {
-    params: {
-      eventsPerSecond: 10,
-    },
-  },
-});
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // --- AUTHENTICATION ---
 export async function getSession() {

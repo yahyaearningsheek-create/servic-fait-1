@@ -1,485 +1,573 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
-import { ArrowLeft, Check, Type, Pen, Upload, X, Move, Download, Stamp } from "lucide-react";
-import { compositeSignatureToImage } from "../../utils/canvasComposite";
-import { imagesToPDF, downloadDataURL } from "../../utils/pdfExport";
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Upload, Edit3, Type, Image as ImageIcon, Check, Move } from 'lucide-react';
 
-interface SignerPDFProps {
-  pdfPages: string[];
-  onBack: () => void;
+type TabType = 'signature' | 'initials' | 'stamp';
+type InputMode = 'text' | 'draw' | 'image';
+type PageMode = 'current' | 'all' | 'custom';
+type ColorType = '#000000' | '#ef4444' | '#3b82f6' | '#22c55e';
+
+interface SignatureConfig {
+  type: TabType;
+  mode: InputMode;
+  content: string | null;
+  color: string;
+  font?: string;
+  pageMode: PageMode;
+  customPages?: string;
 }
 
-type SignatureMode = "type" | "draw" | "import";
-type TabType = "signature" | "initiales" | "tampon";
+export default function SignerPDF() {
+  const [isModalOpen, setIsModalOpen] = useState(true);
+  const [appliedSignature, setAppliedSignature] = useState<SignatureConfig | null>(null);
+  const [position, setPosition] = useState({ x: 300, y: 400 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; initX: number; initY: number } | null>(null);
 
-const FONTS = [
-  { name: "Dancing Script", css: "'Dancing Script', cursive" },
-  { name: "Great Vibes", css: "'Great Vibes', cursive" },
-  { name: "Pacifico", css: "'Pacifico', cursive" },
-  { name: "Caveat", css: "'Caveat', cursive" },
-];
+  const handleApply = (config: SignatureConfig) => {
+    setAppliedSignature(config);
+    setIsModalOpen(false);
+  };
 
-const COLORS = [
-  { name: "Noir", value: "#000000" },
-  { name: "Bleu", value: "#1e40af" },
-  { name: "Rouge", value: "#dc2626" },
-  { name: "Vert", value: "#16a34a" },
-];
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initX: position.x,
+      initY: position.y
+    };
+  };
 
-export default function SignerPDF({ pdfPages, onBack }: SignerPDFProps) {
-  useEffect(() => {
-    const link = document.createElement("link");
-    link.href = "https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;700&family=Great+Vibes&family=Pacifico&family=Caveat:wght@400;700&display=swap";
-    link.rel = "stylesheet";
-    document.head.appendChild(link);
-    return () => { document.head.removeChild(link); };
-  }, []);
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setPosition({
+      x: dragRef.current.initX + dx,
+      y: dragRef.current.initY + dy
+    });
+  };
 
-  const [step, setStep] = useState<"config" | "place">("config");
-  const [activeTab, setActiveTab] = useState<TabType>("signature");
-  const [sigMode, setSigMode] = useState<SignatureMode>("type");
-  const [fullName, setFullName] = useState("");
-  const [initials, setInitials] = useState("");
-  const [selectedFont, setSelectedFont] = useState(0);
-  const [selectedColor, setSelectedColor] = useState("#000000");
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
 
+  return (
+    <div 
+      className="w-full h-screen bg-gray-50 flex flex-col relative overflow-hidden"
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      {/* Top Bar */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-10">
+        <div>
+          <h1 className="text-xl font-bold text-gray-800">Éditeur de PDF</h1>
+          <p className="text-sm text-gray-500">Document_1.pdf</p>
+        </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg font-medium shadow transition-colors flex items-center space-x-2"
+        >
+          <Edit3 className="w-4 h-4" />
+          <span>Configurer la signature</span>
+        </button>
+      </div>
+
+      {/* Main Workspace (PDF View) */}
+      <div className="flex-1 overflow-auto p-8 flex justify-center items-start bg-gray-100 relative">
+        <div className="bg-white w-[800px] min-h-[1131px] shadow-xl relative border border-gray-200 flex flex-col overflow-hidden">
+          <div className="p-8 text-center text-gray-300 font-semibold text-2xl flex-1 flex items-center justify-center select-none border-b border-dashed border-gray-200">
+            [Page 1] Contenu du document PDF
+          </div>
+          <div className="p-8 text-center text-gray-300 font-semibold text-2xl flex-1 flex items-center justify-center select-none">
+            [Page 2] Contenu du document PDF
+          </div>
+          
+          {/* Draggable Signature Overlay */}
+          {appliedSignature && (
+            <div
+              style={{ left: position.x, top: position.y }}
+              className={`absolute cursor-move border-2 ${isDragging ? 'border-blue-500 bg-blue-50/50' : 'border-transparent hover:border-gray-300'} p-2 rounded flex flex-col items-center justify-center group z-50`}
+              onMouseDown={handleMouseDown}
+            >
+              {/* Drag Handle Indicator */}
+              <div className="absolute -top-3 -right-3 bg-white p-1 rounded-full shadow border border-gray-200 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Move className="w-4 h-4 text-gray-500" />
+              </div>
+              
+              {appliedSignature.mode === 'text' && (
+                <span 
+                  style={{ color: appliedSignature.color, fontFamily: appliedSignature.font }} 
+                  className="text-4xl whitespace-nowrap px-4 py-2 select-none"
+                >
+                  {appliedSignature.content || 'Signature'}
+                </span>
+              )}
+              {appliedSignature.mode === 'draw' && appliedSignature.content && (
+                <img src={appliedSignature.content} alt="Signature tracée" className="max-h-24 pointer-events-none select-none" />
+              )}
+              {appliedSignature.mode === 'image' && appliedSignature.content && (
+                <img src={appliedSignature.content} alt="Signature importée" className="max-h-32 pointer-events-none select-none" />
+              )}
+              {appliedSignature.type === 'stamp' && appliedSignature.content && (
+                <img src={appliedSignature.content} alt="Tampon d'entreprise" className="max-h-40 opacity-90 pointer-events-none mix-blend-multiply select-none" />
+              )}
+              <div className="absolute -bottom-8 text-xs text-gray-500 whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                Pages: {appliedSignature.pageMode === 'custom' ? appliedSignature.customPages : (appliedSignature.pageMode === 'current' ? 'Actuelle' : 'Toutes')}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modal Overlay */}
+      {isModalOpen && (
+        <SignatureModal 
+          onClose={() => setIsModalOpen(false)} 
+          onApply={handleApply} 
+        />
+      )}
+    </div>
+  );
+}
+
+interface SignatureModalProps {
+  onClose: () => void;
+  onApply: (config: SignatureConfig) => void;
+}
+
+function SignatureModal({ onClose, onApply }: SignatureModalProps) {
+  const [fullName, setFullName] = useState('Jean Dupont');
+  const [initialsText, setInitialsText] = useState('JD');
+  
+  const [activeTab, setActiveTab] = useState<TabType>('signature');
+  const [inputMode, setInputMode] = useState<InputMode>('text');
+  
+  const [color, setColor] = useState<ColorType>('#000000');
+  const [font, setFont] = useState<string>('"Brush Script MT", "Segoe Print", cursive');
+  
+  const [pageMode, setPageMode] = useState<PageMode>('current');
+  const [customPages, setCustomPages] = useState<string>('');
+
+  const [stampImage, setStampImage] = useState<string | null>(null);
+  const [drawnImage, setDrawnImage] = useState<string | null>(null);
+
+  const colors: ColorType[] = ['#000000', '#ef4444', '#3b82f6', '#22c55e'];
+  const fonts = [
+    { name: 'Manuscrite', value: '"Brush Script MT", "Segoe Print", cursive' },
+    { name: 'Classique', value: 'Georgia, serif' },
+    { name: 'Moderne', value: 'Arial, sans-serif' },
+    { name: 'Élégante', value: '"Courier New", monospace' }
+  ];
+
+  // Canvas Drawing logic
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawData, setDrawData] = useState<string | null>(null);
 
-  const [importedImage, setImportedImage] = useState<string | null>(null);
-  const [stampImage, setStampImage] = useState<string | null>(null);
-
-  const [currentPage, setCurrentPage] = useState(0);
-  const [sigPos, setSigPos] = useState({ x: 60, y: 75, w: 25, h: 8 });
-  const [applyMode, setApplyMode] = useState<"current" | "all" | "range">("current");
-  const [rangeFrom, setRangeFrom] = useState(1);
-  const [rangeTo, setRangeTo] = useState(1);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
-  const pageRef = useRef<HTMLDivElement>(null);
-  const [isSaving, setIsSaving] = useState(false);
-
-  const initCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [isInitDrawing, setIsInitDrawing] = useState(false);
-  const [initDrawData, setInitDrawData] = useState<string | null>(null);
-  const [initSigMode, setInitSigMode] = useState<SignatureMode>("type");
-  const [initImported, setInitImported] = useState<string | null>(null);
-
-  const getSignaturePreview = (): string | null => {
-    if (activeTab === "tampon") return stampImage;
-    if (activeTab === "initiales") {
-      if (initSigMode === "draw") return initDrawData;
-      if (initSigMode === "import") return initImported;
-      return null;
+  useEffect(() => {
+    if (inputMode === 'draw' && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+      }
     }
-    if (sigMode === "draw") return drawData;
-    if (sigMode === "import") return importedImage;
-    return null;
-  };
+  }, [inputMode, color, activeTab]);
 
-  const isTextMode = () => {
-    if (activeTab === "signature") return sigMode === "type";
-    if (activeTab === "initiales") return initSigMode === "type";
-    return false;
-  };
-
-  const getTextContent = () => {
-    if (activeTab === "signature") return fullName;
-    if (activeTab === "initiales") return initials;
-    return "";
-  };
-
-  const startDraw = (e: React.MouseEvent, ref: React.RefObject<HTMLCanvasElement | null>) => {
-    const canvas = ref.current;
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
     const rect = canvas.getBoundingClientRect();
-    ctx.strokeStyle = selectedColor;
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
     ctx.beginPath();
     ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-    if (ref === canvasRef) setIsDrawing(true);
-    else setIsInitDrawing(true);
+    setIsDrawing(true);
   };
 
-  const draw = (e: React.MouseEvent, ref: React.RefObject<HTMLCanvasElement | null>, drawing: boolean) => {
-    if (!drawing) return;
-    const canvas = ref.current;
+  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
     const rect = canvas.getBoundingClientRect();
     ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
     ctx.stroke();
   };
 
-  const endDraw = (ref: React.RefObject<HTMLCanvasElement | null>, setDrawingFn: (v: boolean) => void, setDataFn: (v: string | null) => void) => {
-    setDrawingFn(false);
-    const canvas = ref.current;
-    if (canvas) setDataFn(canvas.toDataURL());
+  const stopDrawing = () => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    const canvas = canvasRef.current;
+    if (canvas) {
+      setDrawnImage(canvas.toDataURL('image/png'));
+    }
   };
 
-  const clearCanvas = (ref: React.RefObject<HTMLCanvasElement | null>, setDataFn: (v: string | null) => void) => {
-    const canvas = ref.current;
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setDataFn(null);
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setDrawnImage(null);
+    }
   };
 
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>, setter: (v: string | null) => void) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: React.Dispatch<React.SetStateAction<string | null>>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setter(ev.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
-  const handlePlaceDragStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    setDragStart({ x: e.clientX, y: e.clientY });
-  };
-
-  const handlePlaceResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsResizing(true);
-    setResizeStart({ x: e.clientX, y: e.clientY, w: sigPos.w, h: sigPos.h });
-  };
-
-  const handlePlaceMouseMove = useCallback((e: MouseEvent) => {
-    if (!pageRef.current) return;
-    const rect = pageRef.current.getBoundingClientRect();
-    if (isDragging) {
-      const dx = ((e.clientX - dragStart.x) / rect.width) * 100;
-      const dy = ((e.clientY - dragStart.y) / rect.height) * 100;
-      setSigPos(p => ({ ...p, x: Math.max(0, Math.min(100 - p.w, p.x + dx)), y: Math.max(0, Math.min(100 - p.h, p.y + dy)) }));
-      setDragStart({ x: e.clientX, y: e.clientY });
-    }
-    if (isResizing) {
-      const dx = ((e.clientX - resizeStart.x) / rect.width) * 100;
-      const dy = ((e.clientY - resizeStart.y) / rect.height) * 100;
-      setSigPos(p => ({ ...p, w: Math.max(8, resizeStart.w + dx), h: Math.max(4, resizeStart.h + dy) }));
-    }
-  }, [isDragging, isResizing, dragStart, resizeStart]);
-
-  const handlePlaceMouseUp = useCallback(() => {
-    setIsDragging(false);
-    setIsResizing(false);
-  }, []);
-
-  useEffect(() => {
-    if (isDragging || isResizing) {
-      window.addEventListener("mousemove", handlePlaceMouseMove);
-      window.addEventListener("mouseup", handlePlaceMouseUp);
-      return () => {
-        window.removeEventListener("mousemove", handlePlaceMouseMove);
-        window.removeEventListener("mouseup", handlePlaceMouseUp);
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setter(event.target?.result as string);
       };
+      reader.readAsDataURL(file);
     }
-  }, [isDragging, isResizing, handlePlaceMouseMove, handlePlaceMouseUp]);
-
-  const canProceed = () => {
-    if (activeTab === "signature") {
-      if (sigMode === "type") return fullName.trim().length > 0;
-      if (sigMode === "draw") return !!drawData;
-      if (sigMode === "import") return !!importedImage;
-    }
-    if (activeTab === "initiales") {
-      if (initSigMode === "type") return initials.trim().length > 0;
-      if (initSigMode === "draw") return !!initDrawData;
-      if (initSigMode === "import") return !!initImported;
-    }
-    if (activeTab === "tampon") return !!stampImage;
-    return false;
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const preview = getSignaturePreview();
-      const sigImage = isTextMode() ? null : preview;
-      const sigText = isTextMode() ? getTextContent() : null;
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
 
-      const pagesToSign = applyMode === "all"
-        ? pdfPages.map((_, i) => i)
-        : applyMode === "range"
-          ? pdfPages.map((_, i) => i).filter(i => i + 1 >= rangeFrom && i + 1 <= rangeTo)
-          : [currentPage];
+  const onDropStamp = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/svg+xml')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setStampImage(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
-      const composited: string[] = [];
-
-      for (let i = 0; i < pdfPages.length; i++) {
-        if (pagesToSign.includes(i)) {
-          const img = new Image();
-          img.src = pdfPages[i];
-          await new Promise<void>(res => { img.onload = () => res(); });
-          const result = await compositeSignatureToImage(
-            pdfPages[i], sigImage, sigText,
-            FONTS[selectedFont].css, selectedColor,
-            sigPos, img.naturalWidth, img.naturalHeight
-          );
-          composited.push(result);
-        } else {
-          composited.push(pdfPages[i]);
-        }
+  const handleSave = () => {
+    let content: string | null = null;
+    if (activeTab === 'stamp') {
+      content = stampImage;
+    } else {
+      if (inputMode === 'text') {
+        content = activeTab === 'signature' ? fullName : initialsText;
+      } else if (inputMode === 'draw') {
+        content = drawnImage;
+      } else if (inputMode === 'image') {
+        content = stampImage; 
       }
-
-      await imagesToPDF(composited, "document_signe.pdf");
-    } catch (err) {
-      console.error("Save error:", err);
-    } finally {
-      setIsSaving(false);
     }
+
+    onApply({
+      type: activeTab,
+      mode: activeTab === 'stamp' ? 'image' : inputMode,
+      content,
+      color,
+      font,
+      pageMode,
+      customPages
+    });
   };
 
-  const tabs: { key: TabType; label: string; icon: React.ReactNode }[] = [
-    { key: "signature", label: "Signature", icon: <Pen className="w-4 h-4" /> },
-    { key: "initiales", label: "Initiales", icon: <Type className="w-4 h-4" /> },
-    { key: "tampon", label: "Tampon d'entreprise", icon: <Stamp className="w-4 h-4" /> },
-  ];
-
-  if (step === "config") {
-    return (
-      <div className="h-full flex flex-col bg-slate-950 text-white">
-        <div className="h-14 flex items-center gap-3 px-5 border-b border-slate-800 shrink-0">
-          <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
-          <h2 className="text-sm font-bold">Configurer votre signature</h2>
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Modal Header */}
+        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+          <h2 className="text-xl font-bold text-gray-800">Configurer les paramètres de votre signature</h2>
+          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="flex-1 overflow-auto p-6 flex justify-center">
-          <div className="w-full max-w-2xl space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Nom Complet</label>
-                <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="ex: Ahmed Mohamed" className="w-full text-sm px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-white placeholder:text-slate-600" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Initiales</label>
-                <input value={initials} onChange={e => setInitials(e.target.value)} placeholder="ex: A.M." className="w-full text-sm px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-white placeholder:text-slate-600" />
-              </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* Identity Header */}
+          <div className="grid grid-cols-2 gap-6 mb-8">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Nom complet</label>
+              <input 
+                type="text" 
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all"
+                placeholder="Ex: Jean Dupont"
+              />
             </div>
-
-            <div className="flex gap-1 bg-slate-900 rounded-xl p-1">
-              {tabs.map(t => (
-                <button key={t.key} onClick={() => setActiveTab(t.key)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === t.key ? "bg-teal-600 text-white shadow-lg" : "text-slate-400 hover:text-white hover:bg-slate-800"}`}>
-                  {t.icon}<span>{t.label}</span>
-                </button>
-              ))}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Initiales</label>
+              <input 
+                type="text" 
+                value={initialsText}
+                onChange={(e) => setInitialsText(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all"
+                placeholder="Ex: JD"
+              />
             </div>
+          </div>
 
-            {activeTab === "signature" && (
-              <div className="space-y-4">
-                <div className="flex gap-1 bg-slate-900/50 rounded-lg p-1">
-                  {([["type", "Typographique", <Type key="t" className="w-3.5 h-3.5" />], ["draw", "Tracé libre", <Pen key="d" className="w-3.5 h-3.5" />], ["import", "Importer", <Upload key="i" className="w-3.5 h-3.5" />]] as [SignatureMode, string, React.ReactNode][]).map(([mode, label, icon]) => (
-                    <button key={mode} onClick={() => setSigMode(mode)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-[11px] font-bold transition-all cursor-pointer ${sigMode === mode ? "bg-slate-700 text-white" : "text-slate-500 hover:text-slate-300"}`}>
-                      {icon}<span>{label}</span>
+          {/* Tabs */}
+          <div className="flex space-x-1 border-b border-gray-200 mb-6">
+            {(['signature', 'initials', 'stamp'] as TabType[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-6 py-3 font-medium text-sm rounded-t-lg transition-colors ${
+                  activeTab === tab 
+                    ? 'bg-blue-50 text-blue-700 border-b-2 border-blue-600' 
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {tab === 'signature' && 'Signature'}
+                {tab === 'initials' && 'Initiales'}
+                {tab === 'stamp' && 'Tampon d\'entreprise'}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab Content */}
+          <div className="min-h-[300px]">
+            {activeTab !== 'stamp' && (
+              <div className="space-y-6">
+                {/* Input Mode Toggles */}
+                <div className="flex bg-gray-100 p-1 rounded-lg w-fit">
+                  {(['text', 'draw', 'image'] as InputMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setInputMode(mode)}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                        inputMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {mode === 'text' && <Type className="w-4 h-4" />}
+                      {mode === 'draw' && <Edit3 className="w-4 h-4" />}
+                      {mode === 'image' && <ImageIcon className="w-4 h-4" />}
+                      <span>
+                        {mode === 'text' && 'Texte'}
+                        {mode === 'draw' && 'Tracé libre'}
+                        {mode === 'image' && 'Image'}
+                      </span>
                     </button>
                   ))}
                 </div>
 
-                {sigMode === "type" && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {FONTS.map((f, i) => (
-                      <button key={f.name} onClick={() => setSelectedFont(i)} className={`p-4 rounded-xl border-2 transition-all cursor-pointer text-center ${selectedFont === i ? "border-teal-500 bg-teal-500/10" : "border-slate-800 bg-slate-900 hover:border-slate-700"}`}>
-                        <span style={{ fontFamily: f.css, fontSize: "24px", color: selectedColor }}>{fullName || "Votre Nom"}</span>
-                        <p className="text-[9px] text-slate-500 mt-2 font-mono">{f.name}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {sigMode === "draw" && (
-                  <div className="space-y-3">
-                    <div className="relative rounded-xl border-2 border-dashed border-slate-700 bg-white overflow-hidden">
-                      <canvas ref={canvasRef} width={560} height={180} className="w-full cursor-crosshair"
-                        onMouseDown={e => startDraw(e, canvasRef)}
-                        onMouseMove={e => draw(e, canvasRef, isDrawing)}
-                        onMouseUp={() => endDraw(canvasRef, setIsDrawing, setDrawData)}
-                        onMouseLeave={() => endDraw(canvasRef, setIsDrawing, setDrawData)}
-                      />
-                      <p className="absolute bottom-2 left-3 text-[10px] text-slate-400 pointer-events-none select-none">Dessinez votre signature ici</p>
-                    </div>
-                    <button onClick={() => clearCanvas(canvasRef, setDrawData)} className="text-xs text-red-400 hover:text-red-300 cursor-pointer">Effacer le tracé</button>
-                  </div>
-                )}
-
-                {sigMode === "import" && (
-                  <div className="space-y-3">
-                    {importedImage ? (
-                      <div className="relative rounded-xl border border-slate-800 bg-slate-900 p-4 flex items-center justify-center">
-                        <img src={importedImage} alt="Signature importée" className="max-h-32 object-contain" />
-                        <button onClick={() => setImportedImage(null)} className="absolute top-2 right-2 p-1 rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/40 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                {/* Sub-content based on Input Mode */}
+                <div className="border border-gray-200 rounded-xl p-6 bg-gray-50/50">
+                  {inputMode === 'text' && (
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-center h-32 bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <span style={{ color, fontFamily: font }} className="text-5xl px-4 py-2 break-all select-none">
+                          {activeTab === 'signature' ? (fullName || 'Signature') : (initialsText || 'JD')}
+                        </span>
                       </div>
-                    ) : (
-                      <label className="flex flex-col items-center justify-center gap-3 py-10 rounded-xl border-2 border-dashed border-slate-700 bg-slate-900/50 cursor-pointer hover:border-teal-500/50 transition-colors">
-                        <Upload className="w-8 h-8 text-slate-500" />
-                        <span className="text-xs text-slate-400">Glissez ou cliquez pour importer (PNG, JPG)</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={e => handleImportFile(e, setImportedImage)} />
-                      </label>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Couleur :</span>
-                  <div className="flex gap-2">
-                    {COLORS.map(c => (
-                      <button key={c.value} onClick={() => setSelectedColor(c.value)} className={`w-7 h-7 rounded-full border-2 transition-all cursor-pointer ${selectedColor === c.value ? "border-teal-400 scale-110" : "border-slate-700 hover:border-slate-500"}`} style={{ background: c.value }} title={c.name} />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "initiales" && (
-              <div className="space-y-4">
-                <div className="flex gap-1 bg-slate-900/50 rounded-lg p-1">
-                  {([["type", "Typographique", <Type key="t" className="w-3.5 h-3.5" />], ["draw", "Tracé libre", <Pen key="d" className="w-3.5 h-3.5" />], ["import", "Importer", <Upload key="i" className="w-3.5 h-3.5" />]] as [SignatureMode, string, React.ReactNode][]).map(([mode, label, icon]) => (
-                    <button key={mode} onClick={() => setInitSigMode(mode)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-[11px] font-bold transition-all cursor-pointer ${initSigMode === mode ? "bg-slate-700 text-white" : "text-slate-500 hover:text-slate-300"}`}>
-                      {icon}<span>{label}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {initSigMode === "type" && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {FONTS.map((f, i) => (
-                      <button key={f.name} onClick={() => setSelectedFont(i)} className={`p-4 rounded-xl border-2 transition-all cursor-pointer text-center ${selectedFont === i ? "border-teal-500 bg-teal-500/10" : "border-slate-800 bg-slate-900 hover:border-slate-700"}`}>
-                        <span style={{ fontFamily: f.css, fontSize: "28px", color: selectedColor }}>{initials || "A.M."}</span>
-                        <p className="text-[9px] text-slate-500 mt-2 font-mono">{f.name}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {initSigMode === "draw" && (
-                  <div className="space-y-3">
-                    <div className="relative rounded-xl border-2 border-dashed border-slate-700 bg-white overflow-hidden">
-                      <canvas ref={initCanvasRef} width={560} height={180} className="w-full cursor-crosshair"
-                        onMouseDown={e => startDraw(e, initCanvasRef)}
-                        onMouseMove={e => draw(e, initCanvasRef, isInitDrawing)}
-                        onMouseUp={() => endDraw(initCanvasRef, setIsInitDrawing, setInitDrawData)}
-                        onMouseLeave={() => endDraw(initCanvasRef, setIsInitDrawing, setInitDrawData)}
-                      />
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-3">Style de police</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {fonts.map(f => (
+                            <button
+                              key={f.name}
+                              onClick={() => setFont(f.value)}
+                              className={`py-3 px-4 rounded-lg border text-center transition-all ${font === f.value ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 bg-white hover:border-gray-300 text-gray-700'}`}
+                            >
+                              <span style={{ fontFamily: f.value }} className="text-xl">{f.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <button onClick={() => clearCanvas(initCanvasRef, setInitDrawData)} className="text-xs text-red-400 hover:text-red-300 cursor-pointer">Effacer</button>
-                  </div>
-                )}
+                  )}
 
-                {initSigMode === "import" && (
-                  <label className="flex flex-col items-center justify-center gap-3 py-10 rounded-xl border-2 border-dashed border-slate-700 bg-slate-900/50 cursor-pointer hover:border-teal-500/50 transition-colors">
-                    <Upload className="w-8 h-8 text-slate-500" />
-                    <span className="text-xs text-slate-400">Importer vos initiales (PNG, JPG)</span>
-                    <input type="file" accept="image/*" className="hidden" onChange={e => handleImportFile(e, setInitImported)} />
-                  </label>
-                )}
+                  {inputMode === 'draw' && (
+                    <div className="space-y-4">
+                      <div className="relative bg-white border-2 border-dashed border-gray-300 rounded-lg overflow-hidden h-48 flex items-center justify-center">
+                        <canvas
+                          ref={canvasRef}
+                          width={600}
+                          height={192}
+                          onMouseDown={startDrawing}
+                          onMouseMove={draw}
+                          onMouseUp={stopDrawing}
+                          onMouseLeave={stopDrawing}
+                          className="absolute inset-0 cursor-crosshair w-full h-full"
+                        />
+                        {!drawnImage && !isDrawing && (
+                          <span className="text-gray-400 pointer-events-none select-none">
+                            Dessinez votre {activeTab === 'signature' ? 'signature' : 'initiale'} ici
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex justify-end">
+                        <button onClick={clearCanvas} className="text-sm text-red-600 hover:text-red-700 font-medium transition-colors">
+                          Effacer le tracé
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Couleur :</span>
-                  <div className="flex gap-2">
-                    {COLORS.map(c => (
-                      <button key={c.value} onClick={() => setSelectedColor(c.value)} className={`w-7 h-7 rounded-full border-2 transition-all cursor-pointer ${selectedColor === c.value ? "border-teal-400 scale-110" : "border-slate-700 hover:border-slate-500"}`} style={{ background: c.value }} title={c.name} />
-                    ))}
-                  </div>
+                  {inputMode === 'image' && (
+                    <div className="bg-white border-2 border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center text-center">
+                      <input 
+                        type="file" 
+                        id="sig-upload" 
+                        className="hidden" 
+                        accept="image/png, image/jpeg, image/svg+xml"
+                        onChange={(e) => handleImageUpload(e, setStampImage)}
+                      />
+                      {stampImage ? (
+                        <div className="relative group">
+                          <img src={stampImage} alt="Uploaded" className="max-h-32 object-contain" />
+                          <button 
+                            onClick={() => setStampImage(null)}
+                            className="absolute -top-3 -right-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-full p-2 opacity-0 group-hover:opacity-100 transition-all shadow-sm"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label htmlFor="sig-upload" className="cursor-pointer flex flex-col items-center group">
+                          <div className="bg-blue-50 p-4 rounded-full text-blue-600 mb-4 group-hover:bg-blue-100 transition-colors">
+                            <Upload className="w-8 h-8" />
+                          </div>
+                          <p className="text-sm font-medium text-gray-700 mb-1">Cliquez pour importer une image</p>
+                          <p className="text-xs text-gray-500">PNG, JPG, SVG supportés</p>
+                        </label>
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Color Palette */}
+                {inputMode !== 'image' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">Couleur de l'encre</label>
+                    <div className="flex space-x-4">
+                      {colors.map(c => (
+                        <button
+                          key={c}
+                          onClick={() => setColor(c)}
+                          className={`w-10 h-10 rounded-full flex items-center justify-center transition-transform ${color === c ? 'ring-2 ring-offset-2 scale-110' : 'hover:scale-105 shadow-sm border border-gray-200'}`}
+                          style={{ backgroundColor: c, ringColor: c }}
+                        >
+                          {color === c && <Check className="w-5 h-5 text-white drop-shadow-md" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {activeTab === "tampon" && (
-              <div className="space-y-4">
+            {activeTab === 'stamp' && (
+              <div 
+                className="border-2 border-dashed border-gray-300 bg-gray-50/50 rounded-xl p-12 flex flex-col items-center justify-center text-center transition-colors hover:bg-gray-50"
+                onDragOver={onDragOver}
+                onDrop={onDropStamp}
+              >
+                <input 
+                  type="file" 
+                  id="stamp-upload" 
+                  className="hidden" 
+                  accept="image/png, image/jpeg, image/svg+xml"
+                  onChange={(e) => handleImageUpload(e, setStampImage)}
+                />
                 {stampImage ? (
-                  <div className="relative rounded-xl border border-slate-800 bg-slate-900 p-6 flex items-center justify-center">
-                    <img src={stampImage} alt="Tampon" className="max-h-40 object-contain" />
-                    <button onClick={() => setStampImage(null)} className="absolute top-2 right-2 p-1.5 rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/40 cursor-pointer"><X className="w-4 h-4" /></button>
+                  <div className="relative group">
+                    <img src={stampImage} alt="Tampon" className="max-h-48 object-contain mix-blend-multiply" />
+                    <button 
+                      onClick={() => setStampImage(null)}
+                      className="absolute -top-3 -right-3 bg-red-100 hover:bg-red-200 text-red-600 rounded-full p-2 transition-colors shadow-sm"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center justify-center gap-4 py-16 rounded-xl border-2 border-dashed border-slate-700 bg-slate-900/50 cursor-pointer hover:border-teal-500/50 transition-colors"
-                    onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add("border-teal-500"); }}
-                    onDragLeave={e => { e.currentTarget.classList.remove("border-teal-500"); }}
-                    onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove("border-teal-500"); const f = e.dataTransfer.files[0]; if (f) { const r = new FileReader(); r.onload = ev => setStampImage(ev.target?.result as string); r.readAsDataURL(f); } }}
-                  >
-                    <Stamp className="w-12 h-12 text-slate-600" />
-                    <div className="text-center">
-                      <p className="text-sm text-slate-300 font-bold">Glissez-déposez votre tampon ici</p>
-                      <p className="text-[10px] text-slate-500 mt-1">Formats : PNG, JPG, SVG</p>
+                  <label htmlFor="stamp-upload" className="cursor-pointer flex flex-col items-center w-full group">
+                    <div className="bg-white p-6 rounded-full shadow-sm border border-gray-100 text-gray-400 mb-6 group-hover:text-blue-500 group-hover:border-blue-100 transition-colors">
+                      <Upload className="w-10 h-10" />
                     </div>
-                    <input type="file" accept="image/*,.svg" className="hidden" onChange={e => handleImportFile(e, setStampImage)} />
+                    <h3 className="text-lg font-semibold text-gray-800 mb-2">Glissez-déposez votre tampon ici</h3>
+                    <p className="text-sm text-gray-500 max-w-sm">
+                      Formats supportés : PNG, JPG, SVG. Un fond transparent est recommandé pour un rendu optimal sur le document.
+                    </p>
+                    <span className="mt-6 px-6 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 shadow-sm group-hover:bg-gray-50 transition-colors">
+                      Parcourir les fichiers
+                    </span>
                   </label>
                 )}
               </div>
             )}
+          </div>
 
-            <button onClick={() => { if (canProceed()) { setRangeTo(pdfPages.length); setStep("place"); } }}
-              disabled={!canProceed()}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-sm shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2">
-              <Check className="w-4 h-4" /><span>Appliquer la signature</span>
-            </button>
+          {/* Placement Logic (CRITICAL) */}
+          <div className="mt-10 border-t border-gray-200 pt-8">
+            <h3 className="text-base font-semibold text-gray-800 mb-4">Emplacement sur le document</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {(['current', 'all', 'custom'] as PageMode[]).map((mode) => (
+                <div key={mode} className="flex flex-col space-y-3">
+                  <label 
+                    className={`flex items-start p-4 rounded-xl border cursor-pointer transition-all ${
+                      pageMode === mode 
+                        ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500 shadow-sm' 
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center h-5">
+                      <input
+                        type="radio"
+                        name="pageMode"
+                        className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                        checked={pageMode === mode}
+                        onChange={() => setPageMode(mode)}
+                      />
+                    </div>
+                    <div className="ml-3 flex flex-col w-full">
+                      <span className={`block text-sm font-medium ${pageMode === mode ? 'text-blue-900' : 'text-gray-900'}`}>
+                        {mode === 'current' && 'Page actuelle uniquement'}
+                        {mode === 'all' && 'Toutes les pages'}
+                        {mode === 'custom' && 'Plage personnalisée'}
+                      </span>
+                      {mode === 'custom' && pageMode === 'custom' && (
+                        <input 
+                          type="text"
+                          placeholder="ex: 1-3, 5"
+                          value={customPages}
+                          onChange={(e) => setCustomPages(e.target.value)}
+                          className="mt-2 block w-full text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 py-1.5 px-3 border outline-none bg-white"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      )}
+                    </div>
+                  </label>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-sm text-gray-500 italic flex items-center">
+              <Move className="w-4 h-4 mr-2" />
+              Une fois appliquée, vous pourrez glisser-déposer la signature sur le document pour ajuster sa position.
+            </p>
           </div>
         </div>
-      </div>
-    );
-  }
 
-  const preview = getSignaturePreview();
-  return (
-    <div className="h-full flex flex-col bg-slate-950 text-white">
-      <div className="h-14 flex items-center justify-between px-5 border-b border-slate-800 shrink-0">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setStep("config")} className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
-          <h2 className="text-sm font-bold">Positionner la signature — Page {currentPage + 1}/{pdfPages.length}</h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <select value={applyMode} onChange={e => setApplyMode(e.target.value as any)} className="text-xs bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-teal-500">
-            <option value="current">Page actuelle uniquement</option>
-            <option value="all">Toutes les pages</option>
-            <option value="range">Plage personnalisée</option>
-          </select>
-          {applyMode === "range" && (
-            <div className="flex items-center gap-1 text-xs">
-              <span className="text-slate-500">De</span>
-              <input type="number" min={1} max={pdfPages.length} value={rangeFrom} onChange={e => setRangeFrom(+e.target.value)} className="w-12 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white" />
-              <span className="text-slate-500">à</span>
-              <input type="number" min={1} max={pdfPages.length} value={rangeTo} onChange={e => setRangeTo(+e.target.value)} className="w-12 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white" />
-            </div>
-          )}
-          <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-lg">
-            <Download className="w-3.5 h-3.5" /><span>{isSaving ? "Enregistrement..." : "Enregistrer"}</span>
+        {/* Footer Actions */}
+        <div className="px-6 py-5 border-t border-gray-100 bg-gray-50 flex justify-end space-x-4">
+          <button 
+            onClick={onClose}
+            className="px-6 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 transition-colors shadow-sm"
+          >
+            Annuler
+          </button>
+          <button 
+            onClick={handleSave}
+            className="px-8 py-2.5 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors shadow-md flex items-center space-x-2"
+          >
+            <Check className="w-4 h-4" />
+            <span>Appliquer</span>
           </button>
         </div>
       </div>
-
-      <div className="flex-1 flex items-center justify-center p-8 overflow-auto bg-slate-900/50">
-        <div ref={pageRef} className="relative shadow-2xl rounded-lg overflow-hidden" style={{ maxHeight: "80vh" }}>
-          {pdfPages[currentPage] && <img src={pdfPages[currentPage]} alt={`Page ${currentPage + 1}`} className="max-h-[75vh] w-auto" draggable={false} />}
-          <div className="absolute cursor-move select-none" style={{ left: `${sigPos.x}%`, top: `${sigPos.y}%`, width: `${sigPos.w}%`, height: `${sigPos.h}%`, border: "2px dashed rgba(20,184,166,0.7)", background: "rgba(20,184,166,0.05)" }}
-            onMouseDown={handlePlaceDragStart}>
-            <div className="w-full h-full flex items-center justify-center overflow-hidden">
-              {isTextMode() ? (
-                <span style={{ fontFamily: FONTS[selectedFont].css, color: selectedColor, fontSize: "clamp(10px, 2vw, 22px)", whiteSpace: "nowrap" }}>{getTextContent()}</span>
-              ) : preview ? (
-                <img src={preview} alt="sig" className="w-full h-full object-contain" draggable={false} />
-              ) : null}
-            </div>
-            <Move className="absolute top-0.5 left-0.5 w-3 h-3 text-teal-400 opacity-70" />
-            <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-teal-500 rounded-full cursor-nwse-resize border-2 border-white shadow" onMouseDown={handlePlaceResizeStart} />
-          </div>
-        </div>
-      </div>
-
-      {pdfPages.length > 1 && (
-        <div className="h-12 flex items-center justify-center gap-4 border-t border-slate-800 shrink-0">
-          <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="px-3 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors">← Précédente</button>
-          <span className="text-xs text-slate-400">Page {currentPage + 1} / {pdfPages.length}</span>
-          <button onClick={() => setCurrentPage(Math.min(pdfPages.length - 1, currentPage + 1))} disabled={currentPage === pdfPages.length - 1} className="px-3 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-30 cursor-pointer transition-colors">Suivante →</button>
-        </div>
-      )}
     </div>
   );
 }

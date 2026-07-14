@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Users, Laptop, Activity, ShieldAlert, CheckCircle, XCircle, Search, RefreshCw, BarChart2, Shield, UserX, AlertCircle } from 'lucide-react';
-import { useWebRTC } from '../features/officelink/hooks/useWebRTC';
 
 interface DBUser {
   id: string;
@@ -34,7 +33,6 @@ interface DBLog {
 }
 
 export default function AdminPage() {
-  const { showToast } = useWebRTC();
   const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'devices' | 'logs'>('stats');
   const [users, setUsers] = useState<DBUser[]>([]);
   const [devices, setDevices] = useState<DBDevice[]>([]);
@@ -43,64 +41,8 @@ export default function AdminPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
-  // Admin authorization & self-block protection state
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
-  // Confirm modal state
-  const [confirmModal, setConfirmModal] = useState<{
-    isOpen: boolean;
-    type: 'user' | 'device';
-    id: string;
-    label: string;
-    currentValue: string;
-  }>({
-    isOpen: false,
-    type: 'user',
-    id: '',
-    label: '',
-    currentValue: ''
-  });
-
-  const checkAdminRole = async (): Promise<boolean> => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setIsAdmin(false);
-        showToast("Vous devez être connecté pour accéder à cette page.", "error");
-        return false;
-      }
-      setCurrentUserId(user.id);
-
-      const { data: userData, error } = await supabase
-        .from('users')
-        .select('role, email')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      const email = user.email || '';
-      const hasAdminEmail = email.toLowerCase().includes('admin') || email.toLowerCase() === 'ysaid13@gmail.com';
-
-      if (userData && (userData.role === 'Super Administrateur' || hasAdminEmail)) {
-        setIsAdmin(true);
-        return true;
-      } else if (!userData && hasAdminEmail) {
-        setIsAdmin(true);
-        return true;
-      } else {
-        setIsAdmin(false);
-        showToast("Accès refusé. Vous n'avez pas les droits d'administration.", "error");
-        return false;
-      }
-    } catch (err) {
-      console.error("Erreur de vérification du rôle admin:", err);
-      setIsAdmin(false);
-      showToast("Erreur lors de la vérification de vos droits d'accès.", "error");
-      return false;
-    }
-  };
-
-  const fetchAdminData = async () => {
+  const fetchData = async () => {
+    setLoading(true);
     try {
       // 1. Fetch Users
       const { data: usersData, error: usersErr } = await supabase
@@ -136,33 +78,16 @@ export default function AdminPage() {
       setLogs(formattedLogs);
     } catch (err) {
       console.error('Erreur chargement données admin:', err);
-      showToast("Erreur lors du chargement des données d'administration.", "error");
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const fetchData = async () => {
-    setLoading(true);
-    await fetchAdminData();
-    setLoading(false);
   };
 
   useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      const authorized = await checkAdminRole();
-      if (authorized) {
-        await fetchAdminData();
-      }
-      setLoading(false);
-    };
-    init();
+    fetchData();
   }, []);
 
   const handleToggleUserBlock = async (userId: string, currentRole: string) => {
-    if (userId === currentUserId) {
-      showToast("Vous ne pouvez pas bloquer votre propre compte administrateur.", "error");
-      return;
-    }
     setActionInProgress(userId);
     const newRole = currentRole === 'Bloqué' ? 'Employé' : 'Bloqué';
     try {
@@ -179,11 +104,9 @@ export default function AdminPage() {
         action: newRole === 'Bloqué' ? 'BLOCAGE_UTILISATEUR' : 'DEBLOCAGE_UTILISATEUR',
         description: `${newRole === 'Bloqué' ? 'Blocage' : 'Déblocage'} de l'utilisateur ID ${userId}`
       });
-      showToast(`L'utilisateur a été ${newRole === 'Bloqué' ? 'bloqué' : 'débloqué'} avec succès.`, "success");
-      await fetchAdminData();
+      fetchData();
     } catch (err) {
-      console.error(err);
-      showToast("Erreur lors de la modification de l'utilisateur.", "error");
+      alert("Erreur lors de la modification de l'utilisateur.");
     } finally {
       setActionInProgress(null);
     }
@@ -206,44 +129,11 @@ export default function AdminPage() {
         action: newStatus === 'blocked' ? 'BLOCAGE_APPAREIL' : 'DEBLOCAGE_APPAREIL',
         description: `${newStatus === 'blocked' ? 'Blocage' : 'Déblocage'} de l'appareil ID ${deviceId}`
       });
-      showToast(`L'appareil a été ${newStatus === 'blocked' ? 'bloqué' : 'débloqué'} avec succès.`, "success");
-      await fetchAdminData();
+      fetchData();
     } catch (err) {
-      console.error(err);
-      showToast("Erreur lors de la modification de l'appareil.", "error");
+      alert("Erreur lors de la modification de l'appareil.");
     } finally {
       setActionInProgress(null);
-    }
-  };
-
-  const openConfirmUserBlock = (userId: string, currentRole: string, email: string) => {
-    setConfirmModal({
-      isOpen: true,
-      type: 'user',
-      id: userId,
-      label: email || userId,
-      currentValue: currentRole
-    });
-  };
-
-  const openConfirmDeviceBlock = (deviceId: string, currentStatus: string, deviceName: string) => {
-    setConfirmModal({
-      isOpen: true,
-      type: 'device',
-      id: deviceId,
-      label: deviceName || deviceId,
-      currentValue: currentStatus
-    });
-  };
-
-  const handleConfirmAction = async () => {
-    const { type, id, currentValue } = confirmModal;
-    setConfirmModal(prev => ({ ...prev, isOpen: false }));
-    
-    if (type === 'user') {
-      await handleToggleUserBlock(id, currentValue);
-    } else {
-      await handleToggleDeviceBlock(id, currentValue);
     }
   };
 
@@ -264,18 +154,6 @@ export default function AdminPage() {
     l.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
     l.user_email?.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  if (isAdmin === false) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-        <ShieldAlert className="w-16 h-16 text-red-500 animate-bounce" />
-        <h2 className="text-2xl font-bold text-slate-800">Accès Refusé</h2>
-        <p className="text-slate-500 max-w-md">
-          Cette section est réservée aux administrateurs réseau d'OfficeLink. Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le support technique.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -465,7 +343,7 @@ export default function AdminPage() {
                         </td>
                         <td className="py-4 px-6 text-center">
                           <button
-                            onClick={() => openConfirmUserBlock(user.id, user.role, user.email)}
+                            onClick={() => handleToggleUserBlock(user.id, user.role)}
                             disabled={actionInProgress === user.id}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 mx-auto ${
                               user.role === 'Bloqué'
@@ -540,7 +418,7 @@ export default function AdminPage() {
                         </td>
                         <td className="py-4 px-6 text-center">
                           <button
-                            onClick={() => openConfirmDeviceBlock(device.id, device.statut, device.nom_appareil)}
+                            onClick={() => handleToggleDeviceBlock(device.id, device.statut)}
                             disabled={actionInProgress === device.id}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
                               device.statut === 'blocked'
@@ -593,44 +471,6 @@ export default function AdminPage() {
           )}
         </>
       )}
-
-      {/* Confirmation Modal */}
-      {confirmModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 animate-in zoom-in duration-200">
-            <div className="flex items-center gap-3 text-amber-600 mb-4">
-              <AlertCircle className="w-6 h-6 shrink-0" />
-              <h3 className="text-lg font-bold text-slate-800">Confirmer l'action</h3>
-            </div>
-            
-            <p className="text-slate-600 text-sm mb-6 leading-relaxed">
-              Voulez-vous vraiment {confirmModal.currentValue === 'Bloqué' || confirmModal.currentValue === 'blocked' ? 'débloquer' : 'bloquer'} l'accès pour{' '}
-              <span className="font-semibold text-slate-800">{confirmModal.label}</span> ?
-              {confirmModal.currentValue !== 'Bloqué' && confirmModal.currentValue !== 'blocked' && (
-                <span className="block mt-2 text-xs text-red-500 font-medium">
-                  Cette action révoquera immédiatement son droit d'échange de fichiers et de communication sur l'intranet.
-                </span>
-              )}
-            </p>
-
-            <div className="flex justify-end gap-3 text-sm font-semibold">
-              <button
-                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl transition-colors"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={handleConfirmAction}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors shadow-sm shadow-blue-200"
-              >
-                Confirmer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-

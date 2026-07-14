@@ -167,7 +167,7 @@ export default function SignalementPage() {
         </div>
 
         {/* Zone intelligente - Portails d'accès professionnels */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 anim-cta">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 anim-cta">
           {/* Card 1: OfficeLink */}
           <div className="bg-gradient-to-br from-blue-950/60 to-indigo-950/40 backdrop-blur-lg rounded-3xl p-6 border border-blue-500/20 shadow-xl group hover:border-blue-500/40 transition-all flex flex-col justify-between">
             <div>
@@ -208,6 +208,28 @@ export default function SignalementPage() {
               className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-xl transition-all hover:translate-x-1 shadow-lg shadow-emerald-600/20 text-sm"
             >
               Gérer les Interventions
+              <span>→</span>
+            </a>
+          </div>
+
+          {/* Card 3: PDF Studio */}
+          <div className="bg-gradient-to-br from-purple-950/60 to-violet-950/40 backdrop-blur-lg rounded-3xl p-6 border border-purple-500/20 shadow-xl group hover:border-purple-500/40 transition-all flex flex-col justify-between">
+            <div>
+              <div className="w-12 h-12 bg-purple-500/20 rounded-xl flex items-center justify-center text-2xl mb-4 border border-purple-500/30 group-hover:scale-105 transition-transform">
+                📄
+              </div>
+              <h3 className="text-lg font-bold text-purple-300 mb-2">
+                PDF Studio
+              </h3>
+              <p className="text-slate-350 text-xs leading-relaxed mb-6">
+                Fusionnez, divisez, compressez, convertissez et signez vos fichiers PDF localement dans votre navigateur en toute sécurité.
+              </p>
+            </div>
+            <a
+              href="/pdf-studio"
+              className="inline-flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-3 rounded-xl transition-all hover:translate-x-1 shadow-lg shadow-purple-600/20 text-sm"
+            >
+              Ouvrir PDF Studio
               <span>→</span>
             </a>
           </div>

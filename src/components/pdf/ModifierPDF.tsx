@@ -1,482 +1,532 @@
-import React, { useState, useRef, useEffect } from "react";
-import { ArrowLeft, Highlighter, Underline, Strikethrough, Pencil, Eraser, StickyNote, Square, Circle, Minus, ArrowUpRight, Type, Stamp, Plus, Trash2, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Bold, Italic, AlignLeft, AlignCenter, AlignRight, X, Palette, Move, Download } from "lucide-react";
-import { compositeAnnotationsToImage } from "../../utils/canvasComposite";
-import { imagesToPDF, downloadDataURL } from "../../utils/pdfExport";
+import React, { useState } from 'react';
+import {
+  Save,
+  Undo,
+  Redo,
+  ZoomIn,
+  ZoomOut,
+  MousePointer2,
+  Hand,
+  PenTool,
+  Highlighter,
+  Type,
+  Square,
+  Circle,
+  Minus,
+  ArrowRight,
+  Stamp,
+  MessageSquare,
+  Eraser,
+  ChevronLeft,
+  ChevronRight,
+  Settings,
+  X,
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  Strikethrough,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  Cloud,
+  Hexagon,
+  Palette,
+  Trash2,
+  CheckCircle2,
+  AlertCircle,
+  ShieldAlert,
+  FileSignature,
+  Download,
+  Printer
+} from 'lucide-react';
 
-interface ModifierPDFProps {
-  pdfPages: string[];
-  onBack: () => void;
-}
+type TabMode = 'annotate' | 'shapes' | 'text' | 'stamps';
+type Tool = string;
 
-type ToolGroup = "annoter" | "formes" | "texte" | "timbres";
-type AnnotTool = "highlight" | "underline" | "strikethrough" | "pencil" | "eraser" | "note";
-type ShapeTool = "rect" | "oval" | "line" | "arrow" | "freehand";
-type Annotation = {
-  id: string; type: string; x: number; y: number; w: number; h: number;
-  color: string; strokeWidth: number; opacity: number; text?: string;
-  points?: { x: number; y: number }[]; fontSize?: number; fontFamily?: string;
-  bold?: boolean; italic?: boolean; align?: string; page: number;
-};
+export const ModifierPDF: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<TabMode>('annotate');
+  const [activeTool, setActiveTool] = useState<Tool>('hand');
+  const [zoom, setZoom] = useState<number>(100);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalPages] = useState<number>(5);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
-const STAMPS = [
-  { text: "APPROUVÉ", color: "#16a34a", bg: "#dcfce7" },
-  { text: "REJETÉ", color: "#dc2626", bg: "#fef2f2" },
-  { text: "CONFIDENTIEL", color: "#2563eb", bg: "#dbeafe" },
-  { text: "BROUILLON", color: "#6b7280", bg: "#f3f4f6" },
-  { text: "URGENT", color: "#dc2626", bg: "#fef2f2" },
-  { text: "COPIE", color: "#2563eb", bg: "#dbeafe" },
-  { text: "ORIGINAL", color: "#7c3aed", bg: "#ede9fe" },
-  { text: "ANNULÉ", color: "#dc2626", bg: "#fef2f2" },
-  { text: "VU POUR APPROBATION", color: "#2563eb", bg: "#dbeafe" },
-  { text: "PAIEMENT EFFECTUÉ", color: "#16a34a", bg: "#dcfce7" },
-  { text: "EN ATTENTE", color: "#f59e0b", bg: "#fef3c7" },
-  { text: "ARCHIVÉ", color: "#6b7280", bg: "#f3f4f6" },
-];
+  // Styling States
+  const [strokeColor, setStrokeColor] = useState<string>('#ef4444');
+  const [strokeWidth, setStrokeWidth] = useState<number>(2);
+  const [fillColor, setFillColor] = useState<string>('transparent');
+  const [opacity, setOpacity] = useState<number>(100);
 
-export default function ModifierPDF({ pdfPages, onBack }: ModifierPDFProps) {
-  const [currentPage, setCurrentPage] = useState(0);
-  const [zoom, setZoom] = useState(100);
-  const [toolGroup, setToolGroup] = useState<ToolGroup>("annoter");
-  const [annotTool, setAnnotTool] = useState<AnnotTool>("highlight");
-  const [shapeTool, setShapeTool] = useState<ShapeTool>("rect");
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [drawColor, setDrawColor] = useState("#facc15");
-  const [strokeWidth, setStrokeWidth] = useState(3);
-  const [drawOpacity, setDrawOpacity] = useState(0.4);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveFormat, setSaveFormat] = useState<"pdf" | "png">("pdf");
+  // Text States
+  const [fontFamily, setFontFamily] = useState<string>('Helvetica');
+  const [fontSize, setFontSize] = useState<number>(12);
+  const [isBold, setIsBold] = useState<boolean>(false);
+  const [isItalic, setIsItalic] = useState<boolean>(false);
+  const [isUnderline, setIsUnderline] = useState<boolean>(false);
+  const [textAlign, setTextAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
-  const [pencilPoints, setPencilPoints] = useState<{ x: number; y: number }[]>([]);
-
-  const [textFontSize, setTextFontSize] = useState(16);
-  const [textFontFamily, setTextFontFamily] = useState("Arial");
-  const [textBold, setTextBold] = useState(false);
-  const [textItalic, setTextItalic] = useState(false);
-  const [textAlign, setTextAlign] = useState("left");
-  const [editingNote, setEditingNote] = useState<string | null>(null);
-
-  const [showCustomStamp, setShowCustomStamp] = useState(false);
-  const [customStampText, setCustomStampText] = useState("");
-  const [customStampColor, setCustomStampColor] = useState("#dc2626");
-
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-  const pageAnnotations = annotations.filter(a => a.page === currentPage);
-
-  const addAnnotation = (type: string, x: number, y: number, extra: Partial<Annotation> = {}) => {
-    const id = `ann-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const ann: Annotation = {
-      id, type, x, y, w: extra.w || 120, h: extra.h || 30,
-      color: extra.color || drawColor, strokeWidth: extra.strokeWidth || strokeWidth,
-      opacity: extra.opacity || (type === "highlight" ? 0.35 : 1),
-      text: extra.text, points: extra.points, page: currentPage,
-      fontSize: extra.fontSize || textFontSize, fontFamily: extra.fontFamily || textFontFamily,
-      bold: extra.bold || textBold, italic: extra.italic || textItalic,
-      align: extra.align || textAlign,
-    };
-    setAnnotations(prev => [...prev, ann]);
-    setSelectedId(id);
-    return id;
+  const handleTabChange = (tab: TabMode) => {
+    setActiveTab(tab);
+    // Set default tool for tab
+    if (tab === 'annotate') setActiveTool('highlight');
+    if (tab === 'shapes') setActiveTool('rectangle');
+    if (tab === 'text') setActiveTool('text-edit');
+    if (tab === 'stamps') setActiveTool('stamp-standard');
+    setIsSidebarOpen(true);
   };
 
-  const updateAnnotation = (id: string, updates: Partial<Annotation>) => {
-    setAnnotations(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-  };
-
-  const deleteAnnotation = (id: string) => {
-    setAnnotations(prev => prev.filter(a => a.id !== id));
-    if (selectedId === id) setSelectedId(null);
-  };
-
-  const handleOverlayMouseDown = (e: React.MouseEvent) => {
-    if (!overlayRef.current) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    setSelectedId(null);
-
-    if (toolGroup === "annoter") {
-      if (annotTool === "highlight" || annotTool === "underline" || annotTool === "strikethrough") {
-        setIsDrawing(true);
-        setDrawStart({ x, y });
-      } else if (annotTool === "pencil") {
-        setIsDrawing(true);
-        setPencilPoints([{ x, y }]);
-      } else if (annotTool === "note") {
-        const id = addAnnotation("note", x - 15, y - 15, { w: 180, h: 100, color: "#facc15", text: "", opacity: 0.95 });
-        setEditingNote(id);
-      }
-    } else if (toolGroup === "formes") {
-      if (shapeTool === "freehand") {
-        setIsDrawing(true);
-        setPencilPoints([{ x, y }]);
-      } else {
-        setIsDrawing(true);
-        setDrawStart({ x, y });
-      }
-    } else if (toolGroup === "texte") {
-      addAnnotation("text", x, y, { w: 200, h: 30, color: drawColor, text: "Texte", opacity: 1 });
-    }
-  };
-
-  const handleOverlayMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !overlayRef.current) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (toolGroup === "annoter" && annotTool === "pencil") {
-      setPencilPoints(prev => [...prev, { x, y }]);
-    } else if (toolGroup === "formes" && shapeTool === "freehand") {
-      setPencilPoints(prev => [...prev, { x, y }]);
-    }
-  };
-
-  const handleOverlayMouseUp = (e: React.MouseEvent) => {
-    if (!isDrawing || !overlayRef.current) return;
-    setIsDrawing(false);
-    const rect = overlayRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (toolGroup === "annoter") {
-      if (annotTool === "highlight") {
-        const ax = Math.min(drawStart.x, x), ay = Math.min(drawStart.y, y);
-        addAnnotation("highlight", ax, ay, { w: Math.abs(x - drawStart.x) || 100, h: Math.abs(y - drawStart.y) || 24 });
-      } else if (annotTool === "underline") {
-        addAnnotation("underline", Math.min(drawStart.x, x), Math.max(drawStart.y, y), { w: Math.abs(x - drawStart.x) || 100, h: 3 });
-      } else if (annotTool === "strikethrough") {
-        addAnnotation("strikethrough", Math.min(drawStart.x, x), (drawStart.y + y) / 2, { w: Math.abs(x - drawStart.x) || 100, h: 2 });
-      } else if (annotTool === "pencil" && pencilPoints.length > 2) {
-        const minX = Math.min(...pencilPoints.map(p => p.x));
-        const minY = Math.min(...pencilPoints.map(p => p.y));
-        addAnnotation("pencil", minX, minY, {
-          w: Math.max(...pencilPoints.map(p => p.x)) - minX + strokeWidth,
-          h: Math.max(...pencilPoints.map(p => p.y)) - minY + strokeWidth,
-          points: pencilPoints.map(p => ({ x: p.x - minX, y: p.y - minY })),
-          color: drawColor, opacity: 1
-        });
-        setPencilPoints([]);
-      }
-    } else if (toolGroup === "formes") {
-      if (shapeTool === "freehand" && pencilPoints.length > 2) {
-        const minX = Math.min(...pencilPoints.map(p => p.x));
-        const minY = Math.min(...pencilPoints.map(p => p.y));
-        addAnnotation("freehand", minX, minY, {
-          w: Math.max(...pencilPoints.map(p => p.x)) - minX + strokeWidth,
-          h: Math.max(...pencilPoints.map(p => p.y)) - minY + strokeWidth,
-          points: pencilPoints.map(p => ({ x: p.x - minX, y: p.y - minY })),
-          color: drawColor, opacity: 1
-        });
-        setPencilPoints([]);
-      } else {
-        const ax = Math.min(drawStart.x, x), ay = Math.min(drawStart.y, y);
-        const w = Math.abs(x - drawStart.x) || 80, h = Math.abs(y - drawStart.y) || 60;
-        addAnnotation(shapeTool, ax, ay, { w, h, color: drawColor, opacity: 1 });
-      }
-    }
-  };
-
-  const handleAnnMouseDown = (e: React.MouseEvent, ann: Annotation) => {
-    e.stopPropagation();
-    setSelectedId(ann.id);
-    if (ann.type === "note" && editingNote !== ann.id) setEditingNote(null);
-    setDraggingId(ann.id);
-    const rect = overlayRef.current?.getBoundingClientRect();
-    if (rect) setDragOffset({ x: e.clientX - rect.left - ann.x, y: e.clientY - rect.top - ann.y });
-  };
-
-  useEffect(() => {
-    if (!draggingId) return;
-    const onMove = (e: MouseEvent) => {
-      const rect = overlayRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left - dragOffset.x;
-      const y = e.clientY - rect.top - dragOffset.y;
-      updateAnnotation(draggingId, { x, y });
-    };
-    const onUp = () => setDraggingId(null);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, [draggingId, dragOffset]);
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const composited: string[] = [];
-      for (let i = 0; i < pdfPages.length; i++) {
-        const pageAnns = annotations.filter(a => a.page === i);
-        const img = new Image();
-        img.src = pdfPages[i];
-        await new Promise<void>((res) => { img.onload = () => res(); });
-        const result = await compositeAnnotationsToImage(
-          pdfPages[i], pageAnns, img.naturalWidth, img.naturalHeight
-        );
-        composited.push(result);
-      }
-      if (saveFormat === "pdf") {
-        await imagesToPDF(composited, "document_modifie.pdf");
-      } else {
-        composited.forEach((img, i) => {
-          downloadDataURL(img, `page_${i + 1}.png`);
-        });
-      }
-    } catch (err) {
-      console.error("Save error:", err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const selectedAnn = annotations.find(a => a.id === selectedId);
-
-  const TOOL_GROUPS: { key: ToolGroup; label: string; icon: React.ReactNode }[] = [
-    { key: "annoter", label: "Annoter", icon: <Highlighter className="w-4 h-4" /> },
-    { key: "formes", label: "Formes", icon: <Square className="w-4 h-4" /> },
-    { key: "texte", label: "Texte", icon: <Type className="w-4 h-4" /> },
-    { key: "timbres", label: "Timbres", icon: <Stamp className="w-4 h-4" /> },
+  const colors = [
+    '#000000', '#ffffff', '#ef4444', '#f97316', '#f59e0b',
+    '#84cc16', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef'
   ];
 
-  const ANNOT_TOOLS: { key: AnnotTool; label: string; icon: React.ReactNode }[] = [
-    { key: "highlight", label: "Surligner", icon: <Highlighter className="w-3.5 h-3.5" /> },
-    { key: "underline", label: "Souligner", icon: <Underline className="w-3.5 h-3.5" /> },
-    { key: "strikethrough", label: "Barrer", icon: <Strikethrough className="w-3.5 h-3.5" /> },
-    { key: "pencil", label: "Crayon", icon: <Pencil className="w-3.5 h-3.5" /> },
-    { key: "eraser", label: "Gomme", icon: <Eraser className="w-3.5 h-3.5" /> },
-    { key: "note", label: "Note", icon: <StickyNote className="w-3.5 h-3.5" /> },
-  ];
+  const renderTopBar = () => (
+    <header className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200 shadow-sm z-20">
+      <div className="flex items-center space-x-6">
+        <h1 className="text-xl font-semibold text-gray-800 tracking-tight">Éditeur PDF</h1>
+        
+        {/* Main Tabs */}
+        <nav className="flex bg-gray-100 p-1 rounded-lg">
+          <button
+            onClick={() => handleTabChange('annotate')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'annotate' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            <PenTool className="w-4 h-4 inline-block mr-2" />
+            Annoter
+          </button>
+          <button
+            onClick={() => handleTabChange('shapes')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'shapes' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            <Square className="w-4 h-4 inline-block mr-2" />
+            Formes
+          </button>
+          <button
+            onClick={() => handleTabChange('text')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'text' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            <Type className="w-4 h-4 inline-block mr-2" />
+            Texte
+          </button>
+          <button
+            onClick={() => handleTabChange('stamps')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === 'stamps' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            <Stamp className="w-4 h-4 inline-block mr-2" />
+            Timbres
+          </button>
+        </nav>
+      </div>
 
-  const SHAPE_TOOLS: { key: ShapeTool; label: string; icon: React.ReactNode }[] = [
-    { key: "rect", label: "Rectangle", icon: <Square className="w-3.5 h-3.5" /> },
-    { key: "oval", label: "Ovale", icon: <Circle className="w-3.5 h-3.5" /> },
-    { key: "line", label: "Ligne", icon: <Minus className="w-3.5 h-3.5" /> },
-    { key: "arrow", label: "Flèche", icon: <ArrowUpRight className="w-3.5 h-3.5" /> },
-    { key: "freehand", label: "Libre", icon: <Pencil className="w-3.5 h-3.5" /> },
-  ];
+      <div className="flex items-center space-x-3">
+        <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors" title="Annuler">
+          <Undo className="w-5 h-5" />
+        </button>
+        <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors" title="Rétablir">
+          <Redo className="w-5 h-5" />
+        </button>
+        <div className="w-px h-6 bg-gray-300 mx-2"></div>
+        <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors">
+          <Printer className="w-5 h-5" />
+        </button>
+        <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors">
+          <Download className="w-5 h-5" />
+        </button>
+        <button className="flex items-center px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md shadow-sm transition-colors focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+          <Save className="w-4 h-4 mr-2" />
+          Enregistrer les modifications
+        </button>
+      </div>
+    </header>
+  );
 
-  const renderAnnotation = (ann: Annotation) => {
-    const commonStyle: React.CSSProperties = { position: "absolute", left: ann.x, top: ann.y, width: ann.w, height: ann.h, opacity: ann.opacity, pointerEvents: "auto" as const, cursor: "move" };
-    const isSelected = selectedId === ann.id;
-    const border = isSelected ? "2px solid #14b8a6" : "none";
+  const renderSecondaryToolbar = () => {
+    return (
+      <div className="flex items-center px-4 py-2 bg-gray-50 border-b border-gray-200 z-10 space-x-1">
+        {/* Common Navigation Tools */}
+        <div className="flex items-center mr-4 space-x-1">
+          <button 
+            onClick={() => setActiveTool('hand')}
+            className={`p-1.5 rounded-md ${activeTool === 'hand' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-200'}`}
+            title="Outil Main"
+          >
+            <Hand className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => setActiveTool('select')}
+            className={`p-1.5 rounded-md ${activeTool === 'select' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-200'}`}
+            title="Outil Sélection"
+          >
+            <MousePointer2 className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="w-px h-5 bg-gray-300 mx-2"></div>
 
-    switch (ann.type) {
-      case "highlight":
-        return <div key={ann.id} style={{ ...commonStyle, background: ann.color, borderRadius: 2, border }} onMouseDown={e => handleAnnMouseDown(e, ann)} />;
-      case "underline":
-        return <div key={ann.id} style={{ ...commonStyle, height: ann.strokeWidth, background: ann.color, border }} onMouseDown={e => handleAnnMouseDown(e, ann)} />;
-      case "strikethrough":
-        return <div key={ann.id} style={{ ...commonStyle, height: ann.strokeWidth, background: ann.color, border }} onMouseDown={e => handleAnnMouseDown(e, ann)} />;
-      case "pencil":
-      case "freehand":
-        return (
-          <svg key={ann.id} style={{ ...commonStyle, overflow: "visible", border }} onMouseDown={e => handleAnnMouseDown(e, ann)}>
-            <polyline points={ann.points?.map(p => `${p.x},${p.y}`).join(" ") || ""} fill="none" stroke={ann.color} strokeWidth={ann.strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        );
-      case "note":
-        return (
-          <div key={ann.id} style={{ ...commonStyle, background: "#fef9c3", borderRadius: 8, boxShadow: "0 2px 8px rgba(0,0,0,0.15)", border: isSelected ? "2px solid #14b8a6" : "1px solid #fde68a", padding: 8, display: "flex", flexDirection: "column" }} onMouseDown={e => handleAnnMouseDown(e, ann)} onDoubleClick={() => setEditingNote(ann.id)}>
-            <div className="text-[9px] font-bold text-amber-700 mb-1 select-none">Note</div>
-            {editingNote === ann.id ? (
-              <textarea autoFocus value={ann.text || ""} onChange={e => updateAnnotation(ann.id, { text: e.target.value })} onBlur={() => setEditingNote(null)} className="flex-1 bg-transparent border-none outline-none text-xs text-gray-800 resize-none" onClick={e => e.stopPropagation()} />
-            ) : (
-              <p className="text-xs text-gray-700 whitespace-pre-wrap">{ann.text || "Double-cliquez pour éditer..."}</p>
-            )}
+        {/* Tab Specific Tools */}
+        {activeTab === 'annotate' && (
+          <div className="flex items-center space-x-1">
+            <button onClick={() => setActiveTool('highlight')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'highlight' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Highlighter className="w-4 h-4 mr-1.5" /> Surligner
+            </button>
+            <button onClick={() => setActiveTool('underline')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'underline' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <UnderlineIcon className="w-4 h-4 mr-1.5" /> Souligner
+            </button>
+            <button onClick={() => setActiveTool('strike')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'strike' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Strikethrough className="w-4 h-4 mr-1.5" /> Barrer
+            </button>
+            <button onClick={() => setActiveTool('draw')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'draw' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <PenTool className="w-4 h-4 mr-1.5" /> Dessin libre
+            </button>
+            <button onClick={() => setActiveTool('note')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'note' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <MessageSquare className="w-4 h-4 mr-1.5" /> Notes
+            </button>
+            <button onClick={() => setActiveTool('eraser')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'eraser' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Eraser className="w-4 h-4 mr-1.5" /> Gomme
+            </button>
           </div>
-        );
-      case "rect":
-        return <div key={ann.id} style={{ ...commonStyle, border: `${ann.strokeWidth}px solid ${ann.color}`, borderRadius: 4, background: "transparent", boxSizing: "border-box" }} onMouseDown={e => handleAnnMouseDown(e, ann)} />;
-      case "oval":
-        return <div key={ann.id} style={{ ...commonStyle, border: `${ann.strokeWidth}px solid ${ann.color}`, borderRadius: "50%", background: "transparent", boxSizing: "border-box" }} onMouseDown={e => handleAnnMouseDown(e, ann)} />;
-      case "line":
-        return (
-          <svg key={ann.id} style={{ ...commonStyle, overflow: "visible" }} onMouseDown={e => handleAnnMouseDown(e, ann)}>
-            <line x1="0" y1={ann.h / 2} x2={ann.w} y2={ann.h / 2} stroke={ann.color} strokeWidth={ann.strokeWidth} />
-          </svg>
-        );
-      case "arrow":
-        return (
-          <svg key={ann.id} style={{ ...commonStyle, overflow: "visible" }} onMouseDown={e => handleAnnMouseDown(e, ann)}>
-            <defs><marker id={`ah-${ann.id}`} markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill={ann.color} /></marker></defs>
-            <line x1="0" y1={ann.h / 2} x2={ann.w} y2={ann.h / 2} stroke={ann.color} strokeWidth={ann.strokeWidth} markerEnd={`url(#ah-${ann.id})`} />
-          </svg>
-        );
-      case "text":
-        return (
-          <div key={ann.id} style={{ ...commonStyle, border: isSelected ? "2px solid #14b8a6" : "1px dashed transparent", background: "transparent", minWidth: 50 }} onMouseDown={e => handleAnnMouseDown(e, ann)} onDoubleClick={() => setEditingNote(ann.id)}>
-            {editingNote === ann.id ? (
-              <textarea autoFocus value={ann.text || ""} onChange={e => updateAnnotation(ann.id, { text: e.target.value })} onBlur={() => setEditingNote(null)} style={{ width: "100%", height: "100%", background: "rgba(255,255,255,0.9)", border: "none", outline: "none", fontSize: ann.fontSize, fontFamily: ann.fontFamily, fontWeight: ann.bold ? "bold" : "normal", fontStyle: ann.italic ? "italic" : "normal", textAlign: (ann.align || "left") as any, color: ann.color, resize: "both" }} onClick={e => e.stopPropagation()} />
-            ) : (
-              <span style={{ fontSize: ann.fontSize, fontFamily: ann.fontFamily, fontWeight: ann.bold ? "bold" : "normal", fontStyle: ann.italic ? "italic" : "normal", textAlign: (ann.align || "left") as any, color: ann.color, display: "block", whiteSpace: "pre-wrap" }}>{ann.text || "Texte"}</span>
-            )}
+        )}
+
+        {activeTab === 'shapes' && (
+          <div className="flex items-center space-x-1">
+            <button onClick={() => setActiveTool('rectangle')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'rectangle' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Square className="w-4 h-4 mr-1.5" /> Rectangle
+            </button>
+            <button onClick={() => setActiveTool('oval')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'oval' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Circle className="w-4 h-4 mr-1.5" /> Ovale
+            </button>
+            <button onClick={() => setActiveTool('line')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'line' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Minus className="w-4 h-4 mr-1.5" /> Ligne
+            </button>
+            <button onClick={() => setActiveTool('arrow')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'arrow' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <ArrowRight className="w-4 h-4 mr-1.5" /> Flèche
+            </button>
+            <button onClick={() => setActiveTool('polygon')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'polygon' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Hexagon className="w-4 h-4 mr-1.5" /> Polygone
+            </button>
+            <button onClick={() => setActiveTool('cloud')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'cloud' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Cloud className="w-4 h-4 mr-1.5" /> Nuage
+            </button>
           </div>
-        );
-      case "stamp":
-        return (
-          <div key={ann.id} style={{ ...commonStyle, border: `3px solid ${ann.color}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: isSelected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.85)", transform: "rotate(-15deg)" }} onMouseDown={e => handleAnnMouseDown(e, ann)}>
-            <span style={{ color: ann.color, fontWeight: 900, fontSize: 18, letterSpacing: 3, textTransform: "uppercase", fontFamily: "Arial Black, sans-serif" }}>{ann.text}</span>
+        )}
+
+        {activeTab === 'text' && (
+          <div className="flex items-center space-x-1">
+            <button onClick={() => setActiveTool('text-edit')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'text-edit' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Type className="w-4 h-4 mr-1.5" /> Ajouter du texte
+            </button>
+            <button onClick={() => setActiveTool('callout')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'callout' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <MessageSquare className="w-4 h-4 mr-1.5" /> Légende
+            </button>
           </div>
-        );
-      default: return null;
-    }
+        )}
+
+        {activeTab === 'stamps' && (
+          <div className="flex items-center space-x-1">
+            <button onClick={() => setActiveTool('stamp-standard')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'stamp-standard' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <Stamp className="w-4 h-4 mr-1.5" /> Timbres standards
+            </button>
+            <button onClick={() => setActiveTool('stamp-dynamic')} className={`flex items-center px-3 py-1.5 rounded-md text-sm ${activeTool === 'stamp-dynamic' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-200'}`}>
+              <FileSignature className="w-4 h-4 mr-1.5" /> Timbres dynamiques
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1"></div>
+        
+        {/* Toggle Sidebar Button */}
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className={`p-1.5 rounded-md transition-colors ${isSidebarOpen ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:bg-gray-200'}`}
+          title="Propriétés"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
+      </div>
+    );
   };
 
-  const PALETTE = ["#facc15", "#ef4444", "#3b82f6", "#22c55e", "#000000", "#f97316", "#8b5cf6", "#ec4899"];
+  const renderSidebar = () => {
+    return (
+      <aside className={`w-80 bg-white border-l border-gray-200 flex flex-col z-20 transition-all duration-300 shadow-xl ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full fixed right-0 h-full opacity-0 pointer-events-none'}`}>
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Propriétés</h2>
+          <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-gray-700 p-1 rounded-md hover:bg-gray-200">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          
+          {/* Colors (Visible for Annotate and Shapes) */}
+          {(activeTab === 'annotate' || activeTab === 'shapes') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Couleur de trait</label>
+              <div className="flex flex-wrap gap-2">
+                {colors.map(c => (
+                  <button 
+                    key={`stroke-${c}`} 
+                    onClick={() => setStrokeColor(c)}
+                    className={`w-6 h-6 rounded-full border-2 ${strokeColor === c ? 'border-blue-500 scale-110' : 'border-gray-300'}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fill Color (Visible for Shapes) */}
+          {activeTab === 'shapes' && (
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-2">Couleur de remplissage</label>
+               <div className="flex flex-wrap gap-2">
+                 <button 
+                    onClick={() => setFillColor('transparent')}
+                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${fillColor === 'transparent' ? 'border-blue-500 scale-110' : 'border-gray-300'} bg-white relative`}
+                    title="Transparent"
+                  >
+                    <div className="absolute w-full h-[2px] bg-red-500 rotate-45"></div>
+                  </button>
+                 {colors.map(c => (
+                   <button 
+                     key={`fill-${c}`} 
+                     onClick={() => setFillColor(c)}
+                     className={`w-6 h-6 rounded-full border-2 ${fillColor === c ? 'border-blue-500 scale-110' : 'border-gray-300'}`}
+                     style={{ backgroundColor: c }}
+                   />
+                 ))}
+               </div>
+             </div>
+          )}
+
+          {/* Thickness */}
+          {(activeTab === 'annotate' || activeTab === 'shapes') && (
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block text-sm font-medium text-gray-700">Épaisseur</label>
+                <span className="text-xs text-gray-500">{strokeWidth} pt</span>
+              </div>
+              <input 
+                type="range" 
+                min="1" max="20" 
+                value={strokeWidth} 
+                onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+          )}
+
+          {/* Opacity */}
+          {activeTab !== 'stamps' && (
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block text-sm font-medium text-gray-700">Opacité</label>
+                <span className="text-xs text-gray-500">{opacity}%</span>
+              </div>
+              <input 
+                type="range" 
+                min="10" max="100" 
+                value={opacity} 
+                onChange={(e) => setOpacity(parseInt(e.target.value))}
+                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+          )}
+
+          {/* Text Formatting */}
+          {activeTab === 'text' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Police</label>
+                <select 
+                  value={fontFamily} 
+                  onChange={(e) => setFontFamily(e.target.value)}
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md border"
+                >
+                  <option value="Helvetica">Helvetica</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Courier">Courier</option>
+                </select>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Taille</label>
+                  <input 
+                    type="number" 
+                    value={fontSize} 
+                    onChange={(e) => setFontSize(parseInt(e.target.value))}
+                    className="block w-full border border-gray-300 rounded-md shadow-sm py-1.5 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Couleur</label>
+                  <div className="h-8 border border-gray-300 rounded-md shadow-sm overflow-hidden flex items-center px-1">
+                    <input 
+                      type="color" 
+                      value={strokeColor} 
+                      onChange={(e) => setStrokeColor(e.target.value)}
+                      className="w-full h-10 -m-2 cursor-pointer border-none bg-transparent"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Style</label>
+                <div className="flex rounded-md shadow-sm">
+                  <button onClick={() => setIsBold(!isBold)} className={`flex-1 flex justify-center py-2 border border-gray-300 rounded-l-md ${isBold ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <Bold className="w-4 h-4 text-gray-700" />
+                  </button>
+                  <button onClick={() => setIsItalic(!isItalic)} className={`flex-1 flex justify-center py-2 border-t border-b border-gray-300 ${isItalic ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <Italic className="w-4 h-4 text-gray-700" />
+                  </button>
+                  <button onClick={() => setIsUnderline(!isUnderline)} className={`flex-1 flex justify-center py-2 border border-gray-300 rounded-r-md ${isUnderline ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <UnderlineIcon className="w-4 h-4 text-gray-700" />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Alignement</label>
+                <div className="flex rounded-md shadow-sm">
+                  <button onClick={() => setTextAlign('left')} className={`flex-1 flex justify-center py-2 border border-gray-300 rounded-l-md ${textAlign === 'left' ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <AlignLeft className="w-4 h-4 text-gray-700" />
+                  </button>
+                  <button onClick={() => setTextAlign('center')} className={`flex-1 flex justify-center py-2 border-t border-b border-gray-300 ${textAlign === 'center' ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <AlignCenter className="w-4 h-4 text-gray-700" />
+                  </button>
+                  <button onClick={() => setTextAlign('right')} className={`flex-1 flex justify-center py-2 border-t border-b border-gray-300 ${textAlign === 'right' ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <AlignRight className="w-4 h-4 text-gray-700" />
+                  </button>
+                  <button onClick={() => setTextAlign('justify')} className={`flex-1 flex justify-center py-2 border border-gray-300 rounded-r-md ${textAlign === 'justify' ? 'bg-gray-200' : 'bg-white hover:bg-gray-50'}`}>
+                    <AlignJustify className="w-4 h-4 text-gray-700" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Stamps Listing */}
+          {activeTab === 'stamps' && (
+            <div className="space-y-4">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase">Timbres Standards</h3>
+              <div className="grid grid-cols-1 gap-3">
+                <button className="flex items-center justify-center p-3 border-2 border-green-500 text-green-600 rounded-lg hover:bg-green-50 transition-colors">
+                  <CheckCircle2 className="w-5 h-5 mr-2" />
+                  <span className="font-bold tracking-widest uppercase">Approuvé</span>
+                </button>
+                <button className="flex items-center justify-center p-3 border-2 border-red-500 text-red-600 rounded-lg hover:bg-red-50 transition-colors">
+                  <AlertCircle className="w-5 h-5 mr-2" />
+                  <span className="font-bold tracking-widest uppercase">Expiré</span>
+                </button>
+                <button className="flex items-center justify-center p-3 border-2 border-yellow-600 text-yellow-700 rounded-lg hover:bg-yellow-50 transition-colors">
+                  <ShieldAlert className="w-5 h-5 mr-2" />
+                  <span className="font-bold tracking-widest uppercase">Confidentiel</span>
+                </button>
+                <button className="flex items-center justify-center p-3 border-2 border-blue-500 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors">
+                  <span className="font-bold tracking-widest uppercase">Tel Quel</span>
+                </button>
+              </div>
+
+              <div className="pt-4 border-t border-gray-200 mt-6">
+                <button className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                  + Créer un timbre personnalisé
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </aside>
+    );
+  };
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-white">
-      <div className="shrink-0 border-b border-slate-800">
-        <div className="h-12 flex items-center gap-3 px-4">
-          <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"><ArrowLeft className="w-5 h-5" /></button>
-          <h2 className="text-sm font-bold mr-4">Modifier le PDF</h2>
-          <div className="flex gap-1 bg-slate-900 rounded-lg p-0.5">
-            {TOOL_GROUPS.map(g => (
-              <button key={g.key} onClick={() => setToolGroup(g.key)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${toolGroup === g.key ? "bg-teal-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"}`}>
-                {g.icon}<span>{g.label}</span>
+    <div className="flex flex-col h-full bg-gray-200 font-sans absolute inset-0">
+      {renderTopBar()}
+      {renderSecondaryToolbar()}
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Main Content Area */}
+        <main className="flex-1 relative overflow-auto flex flex-col items-center bg-gray-100 p-6">
+          
+          {/* Mock PDF Container */}
+          <div 
+            className="bg-white shadow-2xl relative"
+            style={{ 
+              width: '210mm', 
+              minHeight: '297mm', 
+              transform: `scale(${zoom / 100})`, 
+              transformOrigin: 'top center',
+              transition: 'transform 0.2s ease-out'
+            }}
+          >
+            {/* Mock Content */}
+            <div className="absolute inset-0 p-12 pointer-events-none opacity-20">
+              <h1 className="text-4xl font-bold mb-4">Document PDF (Aperçu)</h1>
+              <p className="mb-4">
+                Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+                Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+              </p>
+              <div className="w-full h-px bg-gray-400 my-8"></div>
+              <p className="mb-4">
+                Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+                Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+              </p>
+            </div>
+
+            {/* This layer would be the actual interactive canvas for PDF manipulation */}
+            <div className={`absolute inset-0 z-10 ${activeTool === 'hand' ? 'cursor-grab' : activeTool === 'select' ? 'cursor-default' : 'cursor-crosshair'}`}>
+              {/* Overlays, drawings, shapes go here */}
+            </div>
+          </div>
+
+          {/* Bottom Pagination & Zoom Bar */}
+          <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 bg-opacity-90 backdrop-blur-sm text-white px-6 py-3 rounded-full flex items-center space-x-6 shadow-xl z-20">
+            <div className="flex items-center space-x-4">
+              <button 
+                onClick={() => setZoom(Math.max(25, zoom - 25))}
+                className="p-1 hover:bg-gray-700 rounded-full transition-colors"
+              >
+                <ZoomOut className="w-5 h-5" />
               </button>
-            ))}
-          </div>
-          <div className="flex-1" />
-          <div className="flex items-center gap-1">
-            <button onClick={() => setZoom(Math.max(50, zoom - 10))} className="p-1.5 rounded hover:bg-slate-800 cursor-pointer"><ZoomOut className="w-4 h-4 text-slate-400" /></button>
-            <span className="text-[10px] text-slate-500 w-10 text-center">{zoom}%</span>
-            <button onClick={() => setZoom(Math.min(200, zoom + 10))} className="p-1.5 rounded hover:bg-slate-800 cursor-pointer"><ZoomIn className="w-4 h-4 text-slate-400" /></button>
-          </div>
-          <div className="flex items-center gap-2 ml-3 border-l border-slate-700 pl-3">
-            <select value={saveFormat} onChange={e => setSaveFormat(e.target.value as "pdf" | "png")} className="text-[10px] bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white cursor-pointer">
-              <option value="pdf">PDF</option>
-              <option value="png">PNG</option>
-            </select>
-            <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-xs font-bold cursor-pointer transition-colors shadow-lg">
-              <Download className="w-3.5 h-3.5" /><span>{isSaving ? "Enregistrement..." : "Enregistrer"}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="h-10 flex items-center gap-1 px-4 bg-slate-900/50 border-t border-slate-800/50">
-          {toolGroup === "annoter" && ANNOT_TOOLS.map(t => (
-            <button key={t.key} onClick={() => setAnnotTool(t.key)} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${annotTool === t.key ? "bg-slate-700 text-teal-400" : "text-slate-500 hover:text-slate-300"}`}>
-              {t.icon}<span>{t.label}</span>
-            </button>
-          ))}
-          {toolGroup === "formes" && SHAPE_TOOLS.map(t => (
-            <button key={t.key} onClick={() => setShapeTool(t.key)} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer ${shapeTool === t.key ? "bg-slate-700 text-teal-400" : "text-slate-500 hover:text-slate-300"}`}>
-              {t.icon}<span>{t.label}</span>
-            </button>
-          ))}
-          {toolGroup === "texte" && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-500">Cliquez sur la page pour placer un texte</span>
-              <select value={textFontFamily} onChange={e => setTextFontFamily(e.target.value)} className="text-[10px] bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white"><option>Arial</option><option>Times New Roman</option><option>Courier New</option><option>Georgia</option></select>
-              <input type="number" value={textFontSize} onChange={e => setTextFontSize(+e.target.value)} min={8} max={72} className="w-12 text-[10px] bg-slate-800 border border-slate-700 rounded px-2 py-1 text-center text-white" />
-              <button onClick={() => setTextBold(!textBold)} className={`p-1 rounded cursor-pointer ${textBold ? "bg-teal-600 text-white" : "text-slate-500 hover:text-white"}`}><Bold className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setTextItalic(!textItalic)} className={`p-1 rounded cursor-pointer ${textItalic ? "bg-teal-600 text-white" : "text-slate-500 hover:text-white"}`}><Italic className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setTextAlign("left")} className={`p-1 rounded cursor-pointer ${textAlign === "left" ? "text-teal-400" : "text-slate-500"}`}><AlignLeft className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setTextAlign("center")} className={`p-1 rounded cursor-pointer ${textAlign === "center" ? "text-teal-400" : "text-slate-500"}`}><AlignCenter className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setTextAlign("right")} className={`p-1 rounded cursor-pointer ${textAlign === "right" ? "text-teal-400" : "text-slate-500"}`}><AlignRight className="w-3.5 h-3.5" /></button>
-            </div>
-          )}
-          {toolGroup === "timbres" && <span className="text-[10px] text-slate-500">Sélectionnez un timbre dans le panneau latéral →</span>}
-          <div className="flex-1" />
-          {(toolGroup === "annoter" || toolGroup === "formes") && (
-            <div className="flex items-center gap-1.5">
-              {PALETTE.map(c => (
-                <button key={c} onClick={() => setDrawColor(c)} className={`w-5 h-5 rounded-full border-2 transition-all cursor-pointer ${drawColor === c ? "border-white scale-125" : "border-slate-700"}`} style={{ background: c }} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-auto flex items-start justify-center p-6 bg-slate-900/30">
-          <div className="relative shadow-2xl" style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top center" }}>
-            {pdfPages[currentPage] && <img src={pdfPages[currentPage]} alt={`Page ${currentPage + 1}`} className="block max-w-none" draggable={false} />}
-            <div ref={overlayRef} className="absolute inset-0" style={{ cursor: toolGroup === "texte" ? "text" : "crosshair" }}
-              onMouseDown={handleOverlayMouseDown} onMouseMove={handleOverlayMouseMove} onMouseUp={handleOverlayMouseUp}>
-              {isDrawing && pencilPoints.length > 1 && (
-                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: "visible" }}>
-                  <polyline points={pencilPoints.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke={drawColor} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
-                </svg>
-              )}
-              {pageAnnotations.map(renderAnnotation)}
-            </div>
-          </div>
-        </div>
-
-        {toolGroup === "timbres" && (
-          <div className="w-64 border-l border-slate-800 bg-slate-950 overflow-auto p-4 space-y-3 shrink-0">
-            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Timbres Standards</p>
-            <div className="space-y-2">
-              {STAMPS.map(s => (
-                <button key={s.text} onClick={() => addAnnotation("stamp", 100, 100, { w: 180, h: 50, color: s.color, text: s.text, opacity: 0.9 })}
-                  className="w-full p-3 rounded-xl border border-slate-800 hover:border-slate-600 transition-all cursor-pointer flex items-center justify-center" style={{ background: s.bg }}>
-                  <span style={{ color: s.color, fontWeight: 900, fontSize: 13, letterSpacing: 2, fontFamily: "Arial Black, sans-serif" }}>{s.text}</span>
-                </button>
-              ))}
-            </div>
-            <div className="border-t border-slate-800 pt-3">
-              <button onClick={() => setShowCustomStamp(!showCustomStamp)} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-bold text-slate-300 cursor-pointer transition-colors">
-                <Plus className="w-3.5 h-3.5" /><span>Timbre personnalisé</span>
+              <span className="text-sm font-medium w-12 text-center">{zoom}%</span>
+              <button 
+                onClick={() => setZoom(Math.min(300, zoom + 25))}
+                className="p-1 hover:bg-gray-700 rounded-full transition-colors"
+              >
+                <ZoomIn className="w-5 h-5" />
               </button>
-              {showCustomStamp && (
-                <div className="mt-3 space-y-2">
-                  <input value={customStampText} onChange={e => setCustomStampText(e.target.value)} placeholder="Texte du timbre..." className="w-full text-xs bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white" />
-                  <div className="flex gap-1">
-                    {["#dc2626", "#16a34a", "#2563eb", "#7c3aed", "#f59e0b"].map(c => (
-                      <button key={c} onClick={() => setCustomStampColor(c)} className={`w-6 h-6 rounded-full border-2 cursor-pointer ${customStampColor === c ? "border-white" : "border-slate-700"}`} style={{ background: c }} />
-                    ))}
-                  </div>
-                  <button onClick={() => { if (customStampText.trim()) { addAnnotation("stamp", 100, 100, { w: 180, h: 50, color: customStampColor, text: customStampText.toUpperCase() }); setCustomStampText(""); setShowCustomStamp(false); } }}
-                    className="w-full py-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-xs font-bold cursor-pointer transition-colors">Créer</button>
-                </div>
-              )}
             </div>
-          </div>
-        )}
-
-        {selectedAnn && toolGroup !== "timbres" && (
-          <div className="w-56 border-l border-slate-800 bg-slate-950 p-4 space-y-4 shrink-0">
-            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Propriétés</p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Couleur</label>
-                <div className="flex gap-1 flex-wrap">
-                  {PALETTE.map(c => (
-                    <button key={c} onClick={() => updateAnnotation(selectedAnn.id, { color: c })} className={`w-5 h-5 rounded-full border-2 cursor-pointer ${selectedAnn.color === c ? "border-white" : "border-slate-700"}`} style={{ background: c }} />
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Épaisseur : {selectedAnn.strokeWidth}px</label>
-                <input type="range" min={1} max={10} value={selectedAnn.strokeWidth} onChange={e => updateAnnotation(selectedAnn.id, { strokeWidth: +e.target.value })} className="w-full" />
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1">Opacité : {Math.round(selectedAnn.opacity * 100)}%</label>
-                <input type="range" min={10} max={100} value={Math.round(selectedAnn.opacity * 100)} onChange={e => updateAnnotation(selectedAnn.id, { opacity: +e.target.value / 100 })} className="w-full" />
-              </div>
-              <button onClick={() => deleteAnnotation(selectedAnn.id)} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-bold cursor-pointer transition-colors">
-                <Trash2 className="w-3.5 h-3.5" /><span>Supprimer</span>
+            
+            <div className="w-px h-6 bg-gray-600"></div>
+            
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className={`p-1 rounded-full transition-colors ${currentPage === 1 ? 'text-gray-500 cursor-not-allowed' : 'hover:bg-gray-700'}`}
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <span className="text-sm font-medium">Page {currentPage} / {totalPages}</span>
+              <button 
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                className={`p-1 rounded-full transition-colors ${currentPage === totalPages ? 'text-gray-500 cursor-not-allowed' : 'hover:bg-gray-700'}`}
+              >
+                <ChevronRight className="w-5 h-5" />
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </main>
 
-      <div className="h-12 flex items-center justify-center gap-4 border-t border-slate-800 shrink-0 bg-slate-950">
-        <button onClick={() => setCurrentPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0} className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
-        <span className="text-xs text-slate-400">Page {currentPage + 1} / {pdfPages.length}</span>
-        <button onClick={() => setCurrentPage(Math.min(pdfPages.length - 1, currentPage + 1))} disabled={currentPage >= pdfPages.length - 1} className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 cursor-pointer"><ChevronRight className="w-4 h-4" /></button>
-        <span className="text-[10px] text-slate-600 ml-4">{annotations.filter(a => a.page === currentPage).length} annotations sur cette page</span>
+        {renderSidebar()}
       </div>
     </div>
   );
-}
+};
+
+export default ModifierPDF;
